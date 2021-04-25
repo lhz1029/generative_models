@@ -27,6 +27,7 @@ import pprint
 from functools import partial
 
 from datasets.chexpert import ChexpertDataset
+from datasets.joint_chest import JointDataset
 
 parser = argparse.ArgumentParser()
 # action
@@ -44,7 +45,7 @@ parser.add_argument('--n_res_channels', default=64, type=int, help='Number of ch
 parser.add_argument('--n_res_layers', default=2, type=int, help='Number of residual layers inside the residual block.')
 parser.add_argument('--n_cond_classes', type=int, help='(NOT USED here; used in training prior but requires flag for dataloader) Number of classes if conditional model.')
 # data params
-parser.add_argument('--dataset', choices=['cifar10', 'chexpert'], default='chexpert')
+parser.add_argument('--dataset', choices=['cifar10', 'chexpert', 'joint_chest'], default='chexpert')
 parser.add_argument('--data_dir', default='~/data/', help='Location of datasets.')
 parser.add_argument('--output_dir', type=str, help='Location where weights, logs, and sample should be saved.')
 parser.add_argument('--restore_dir', type=str, help='Path to model config and checkpoint to restore.')
@@ -66,6 +67,9 @@ parser.add_argument('--distributed', action='store_true', default=False, help='W
 # generation param
 parser.add_argument('--n_samples', type=int, default=64, help='Number of samples to generate.')
 
+# joint dataset
+parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
+parser.add_argument('--dry', type=bool, default=False)
 
 # --------------------
 # Data and model loading
@@ -84,6 +88,23 @@ def fetch_vqvae_dataloader(args, train=True):
                                   transform=T.Compose([T.ToTensor(), lambda x: x.mul(2).sub(1)]))
         if not 'input_dims' in args: args.input_dims = dataset.input_dims
         args.n_cond_classes = len(dataset.attr_idxs)
+    elif args.dataset == 'joint_chest':
+        hparams = {}
+        hparams['subset'] = True
+        hparams['upsample'] = False
+        hparams['input_shape'] = args.input_shape # (1, 32, 32)
+        hparams['batch_size'] = args.batch_size
+        hparams['rho'] = .9 if train else .5 # correlation between label and hospital
+        hparams['hosp'] = True # return y is now combination of hospital and label
+        if args.dry:
+            mode = 'dry'
+        elif train:
+            mode = 'train'
+        else:
+            mode = 'val'
+        train_joint_dataset = JointDataset(None, 1, mode, hparams)
+        args.input_dims = args.input_shape
+        dataset = train_joint_dataset.datasets[0]
 
     if args.mini_data:
         dataset.data = dataset.data[:args.batch_size]
@@ -310,10 +331,12 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, writer, args):
     model.train()
 
     with tqdm(total=len(dataloader), desc='epoch {}/{}'.format(epoch, args.start_epoch + args.n_epochs)) as pbar:
-        for x, _ in dataloader:
+        # for x, _ in dataloader:
+        for x in dataloader:
             args.step += 1
 
-            loss = model(x.to(args.device), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
+            loss = model(x[0].to(args.device), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
+            # loss = model(x.to(args.device), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
 
             optimizer.zero_grad()
             loss.backward()
@@ -397,10 +420,11 @@ if __name__ == '__main__':
 
     # save config
     if not os.path.exists(os.path.join(args.output_dir, 'config_{}.json'.format(args.cuda))):
+        print('saving config')
         save_json(args.__dict__, 'config_{}'.format(args.cuda), args)
 
     # setup model
-    model, optimizer, scheduler = load_model(VQVAE2, args.output_dir, args,
+    model, optimizer, scheduler = load_model(VQVAE2, None, args.output_dir, args,
                                              restore=(args.restore_dir is not None),
                                              eval_mode=False,
                                              optimizer_cls=partial(torch.optim.Adam, lr=args.lr),

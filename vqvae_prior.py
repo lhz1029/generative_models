@@ -68,7 +68,8 @@ parser.add_argument('--rank', type=int, default=0)
 # generation param
 parser.add_argument('--n_samples', type=int, default=8, help='Number of samples to generate.')
 
-
+parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
+parser.add_argument('--dry', type=bool, default=False)
 
 # --------------------
 # Data and model loading
@@ -236,6 +237,7 @@ class PixelSNAIL(nn.Module):
         # init background
         background_v = ((torch.arange(H, dtype=torch.float) - H / 2) / 2).view(1,1,-1,1).expand(1,1,H,W)
         background_h = ((torch.arange(W, dtype=torch.float) - W / 2) / 2).view(1,1,1,-1).expand(1,1,H,W)
+        print(H, W, background_v.shape, background_h.shape)
         self.register_buffer('background', torch.cat([background_v, background_h], 1))
         # init attention mask over current and future pixels
         attn_mask = torch.tril(torch.ones(1,1,H*W,H*W), diagonal=-1).byte()  # 1s below diagonal -- attend to context only
@@ -580,7 +582,7 @@ if __name__ == '__main__':
 
     # load vqvae
     #   load config; extract bits and input sizes throughout the hierarchy from the vqvae config
-    vqvae_config = load_json(os.path.join(args.vqvae_dir, 'config.json'))
+    vqvae_config = load_json(os.path.join(args.vqvae_dir, 'config_{}.json'.format(args.cuda)))
     img_dims = vqvae_config['input_dims'][1:]
     args.input_dims = [img_dims, [img_dims[0]//4, img_dims[1]//4], [img_dims[0]//8, img_dims[1]//8]]
     args.n_bits = int(np.log2(vqvae_config['n_embeddings']))
@@ -599,8 +601,8 @@ if __name__ == '__main__':
 
     # load prior model
     #   save prior config to feed to load_model
-    if not os.path.exists(os.path.join(args.output_dir, 'config_{}.json'.format(args.cuda))):
-        save_json(args.__dict__, 'config_{}'.format(args.cuda), args)
+    if not os.path.exists(os.path.join(args.output_dir, 'config_prior_{}.json'.format(args.cuda))):
+        save_json(args.__dict__, 'config_prior_{}'.format(args.cuda), args)
     #   load model + optimizers, scheduler if training
     if args.which_prior:
         model, optimizer, scheduler = load_model(PixelCNN if args.which_prior=='bottom' else PixelSNAIL,
