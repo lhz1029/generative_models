@@ -344,7 +344,7 @@ class VQVAE2(nn.Module):
 def train_epoch(model, dataloader, optimizer, scheduler, epoch, writer, args):
     model.train()
 
-    with tqdm(total=len(dataloader), desc='epoch {}/{}'.format(epoch, args.start_epoch + args.n_epochs)) as pbar:
+    with tqdm(total=len(dataloader), desc='epoch {}/{}'.format(epoch, args.n_epochs)) as pbar:
         # for x, _ in dataloader:
         # for x in dataloader:
         for x in dataloader:
@@ -434,7 +434,7 @@ def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, sch
     train_data = torch.load('train_data.pt')
     valid_data = torch.load('valid_data.pt')
 
-    for epoch in range(args.start_epoch, args.start_epoch + args.n_epochs):
+    for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
         train_epoch(model, train_data, optimizer, scheduler, epoch, writer, args)
 
