@@ -70,6 +70,7 @@ parser.add_argument('--n_samples', type=int, default=8, help='Number of samples 
 
 parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
+parser.add_argument('--hosp', type=bool, default=False)
 
 # --------------------
 # Data and model loading
@@ -514,6 +515,8 @@ def generate(vqvae, bottom_model, top_model, args, ys=None):
 def generate_samples_in_training(model, vqvae, dataloader, args):
     if args.which_prior == 'top':
         # zero out bottom samples so no contribution
+        args.input_dims = [img_dims, [img_dims[0]//4, img_dims[1]//4], [img_dims[0]//8, img_dims[1]//8]]
+        print('args.input_dims[1]', args.input_dims[1])
         bottom_samples = torch.zeros(args.n_samples*(args.n_cond_classes+1),1,*args.input_dims[1], dtype=torch.long)
         # sample top prior
         top_samples = []
@@ -557,7 +560,7 @@ if __name__ == '__main__':
                     '_outstack{n_out_stack_layers}_drop{drop_rate}' + \
                     '_{}'.format(time.strftime('%Y-%m-%d_%H-%M', time.gmtime()))
         args.output_dir = './results/{}/{}'.format(os.path.splitext(__file__)[0], exp_name.format(**args.__dict__))
-        os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=False)
 
     # setup device and distributed training
     if args.distributed:
@@ -601,8 +604,8 @@ if __name__ == '__main__':
 
     # load prior model
     #   save prior config to feed to load_model
-    if not os.path.exists(os.path.join(args.output_dir, 'config_prior_{}.json'.format(args.cuda))):
-        save_json(args.__dict__, 'config_prior_{}'.format(args.cuda), args)
+    if not os.path.exists(os.path.join(args.output_dir, 'config_{}.json'.format(args.cuda))):
+        save_json(args.__dict__, 'config_{}'.format(args.cuda), args)
     #   load model + optimizers, scheduler if training
     if args.which_prior:
         model, optimizer, scheduler = load_model(PixelCNN if args.which_prior=='bottom' else PixelSNAIL,

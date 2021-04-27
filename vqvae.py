@@ -70,6 +70,7 @@ parser.add_argument('--n_samples', type=int, default=64, help='Number of samples
 # joint dataset
 parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
+parser.add_argument('--hosp', type=bool, default=False)
 
 # --------------------
 # Data and model loading
@@ -95,7 +96,7 @@ def fetch_vqvae_dataloader(args, train=True):
         hparams['input_shape'] = args.input_shape # (1, 32, 32)
         hparams['batch_size'] = args.batch_size
         hparams['rho'] = .9 if train else .5 # correlation between label and hospital
-        hparams['hosp'] = True # return y is now combination of hospital and label
+        hparams['hosp'] = args.hosp # return y is now combination of hospital and label
         if args.dry:
             mode = 'dry'
         elif train:
@@ -355,6 +356,8 @@ def show_recons_from_hierarchy(model, n_samples, x, z_q, recon_x=None):
 
     # construct image grid
     x = make_grid(x[:n_samples].cpu(), normalize=True)
+    import numpy as np
+    np.save('x.npy', x.numpy())
     recon_x = make_grid(recon_x[:n_samples].cpu(), normalize=True)
     recon_top = make_grid(recon_top[:n_samples].cpu(), normalize=True)
     separator = torch.zeros(x.shape[0], 4, x.shape[2])
@@ -366,7 +369,7 @@ def evaluate(model, dataloader, args):
 
     recon_loss = 0
     for x, _ in tqdm(dataloader):
-        x = x.to(args.device)
+        x = x[0].to(args.device)
         z_e = model.encode(x)
         encoding_indices, z_q = model.quantize(z_e)
         recon_x = model.decode(z_e, z_q)
@@ -409,6 +412,8 @@ if __name__ == '__main__':
     if not args.output_dir:  # if not given use results/file_name/time_stamp
         args.output_dir = './results/{}/{}'.format(os.path.splitext(__file__)[0], time.strftime('%Y-%m-%d_%H-%M-%S', time.gmtime()))
     writer = SummaryWriter(log_dir = args.output_dir)
+
+    os.makedirs(args.output_dir, exist_ok=False)
 
     args.device = 'cuda:{}'.format(args.cuda) if args.cuda is not None and torch.cuda.is_available() else 'cpu'
 
