@@ -71,7 +71,7 @@ parser.add_argument('--n_samples', type=int, default=8, help='Number of samples 
 parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
-
+parser.add_argument('--cond_x_top', type=bool, default=False)
 # --------------------
 # Data and model loading
 # --------------------
@@ -441,20 +441,43 @@ def evaluate(model, dataloader, args):
     return losses / (len(dataloader) * np.log(2))  # to bits per dim
 
 def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
+    train_data = []
+    i = 0
+    for x in train_dataloader:
+        i += 1
+        print(i)
+        train_data.append((x[0].to(args.device, non_blocking=True), x[1].to(args.device, non_blocking=True), x[2].to(args.device, non_blocking=True)))
+    
+    torch.save(train_data, 'train_data_prior.pt')
+    
+    valid_data = []
+    i = 0
+    for x in valid_dataloader:
+        i += 1
+        print(i)
+        valid_data.append((x[0].to(args.device, non_blocking=True), x[1].to(args.device, non_blocking=True), x[2].to(args.device, non_blocking=True)))
+    
+    torch.save(valid_data, 'valid_data_prior.pt')
+    
+    x_dataloader = fetch_vqvae_dataloader(args, train=False)
+
     for epoch in range(args.start_epoch, args.start_epoch + args.n_epochs):
-        train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
+        # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
+        train_epoch(model, train_data, optimizer, scheduler, epoch, writer, args)
 
         if (epoch+1) % args.eval_interval == 0:
 #            optimizer.use_ema(True)
 
             # evaluate
-            eval_bpd = evaluate(model, valid_dataloader, args)
+            # eval_bpd = evaluate(model, valid_dataloader, args)
+            eval_bpd = evaluate(model, valid_data, args)
             if args.on_main_process:
                 print('Evaluate bits per dim: {:.4f}'.format(eval_bpd))
                 writer.add_scalar('eval_bits_per_dim', eval_bpd, args.step)
 
             # generate
-            samples = generate_samples_in_training(model, vqvae, train_dataloader, args)
+            # samples = generate_samples_in_training(model, vqvae, train_dataloader, args)
+            samples = generate_samples_in_training(model, vqvae, train_data, args, x_dataloader)
             samples = make_grid(samples, normalize=True, nrow=args.n_samples)
             if args.distributed:
                 # collect samples tensor from all processes onto main process cpu
@@ -500,7 +523,7 @@ def sample_prior(model, h, y, n_samples, input_dims, n_bits):
     return deprocess(out, n_bits)  # out (B,1,H,W) field of latents in latent space [0, 2**n_bits)
 
 @torch.no_grad()
-def generate(vqvae, bottom_model, top_model, args, ys=None):
+def generate(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
     samples = []
     for y in ys.unsqueeze(1):  # condition on class one-hot labels; (n_samples, 1, n_cond_classes) when sliced on dim 0 returns (1,n_cond_classes)
         # sample top prior conditioned on class labels y
@@ -508,11 +531,16 @@ def generate(vqvae, bottom_model, top_model, args, ys=None):
         # sample bottom prior conditioned on top_sample codes and class labels y
         bottom_samples = sample_prior(bottom_model, preprocess(top_samples, args.n_bits), y, args.n_samples, args.input_dims[1], args.n_bits)
         # decode
-        samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)))]
+        if args.cond_x_top:
+            x, _ = next(iter(x_dataloader))
+            x_top = x[:, :, :4].to(args.device)
+            samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)), x_top)]
+        else:
+            samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)))]
     samples = torch.cat(samples)
     return make_grid(samples, normalize=True, scale_each=True)
 
-def generate_samples_in_training(model, vqvae, dataloader, args):
+def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=None):
     if args.which_prior == 'top':
         # zero out bottom samples so no contribution
         args.input_dims = [img_dims, [img_dims[0]//4, img_dims[1]//4], [img_dims[0]//8, img_dims[1]//8]]
@@ -524,7 +552,12 @@ def generate_samples_in_training(model, vqvae, dataloader, args):
             top_samples += [sample_prior(model, None, y, args.n_samples, args.input_dims[2], args.n_bits).cpu()]
         top_samples = torch.cat(top_samples)
         # decode
-        samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))))
+        if args.cond_x_top:
+            x, _ = next(iter(x_dataloader))
+            x_top = x[:, :, :4].to(args.device)
+            samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))), x_top=x_top)
+        else:
+            samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))))
 
     elif args.which_prior == 'bottom':  # level 1
         # use the dataset ground truth top codes and only sample the bottom
@@ -536,9 +569,16 @@ def generate_samples_in_training(model, vqvae, dataloader, args):
         # stack (1) recon using bottom+top actual latents,
         #       (2) recon using top latents only,
         #       (3) recon using top latent and bottom prior samples
-        recon_actuals = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt, top_gt)))
-        recon_top = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt.fill_(0), top_gt)))
-        recon_samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples, top_gt)))
+        if args.cond_x_top:
+            x, _ = next(iter(x_dataloader))
+            x_top = x[:, :, :4].to(args.device)
+            recon_actuals = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt, top_gt)), x_top=x_top)
+            recon_top = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt.fill_(0), top_gt)), x_top=x_top)
+            recon_samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples, top_gt)), x_top=x_top)
+        else:
+            recon_actuals = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt, top_gt)))
+            recon_top = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt.fill_(0), top_gt)))
+            recon_samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples, top_gt)))
         samples = torch.cat([recon_actuals, recon_top, recon_samples])
 
     return samples

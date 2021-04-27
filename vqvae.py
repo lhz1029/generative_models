@@ -71,6 +71,7 @@ parser.add_argument('--n_samples', type=int, default=64, help='Number of samples
 parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
+parser.add_argument('--cond_x_top', type=bool, default=False)
 
 # --------------------
 # Data and model loading
@@ -217,10 +218,10 @@ class ResidualLayer(nn.Sequential):
 
 class VQVAE2(nn.Module):
     def __init__(self, input_dims, n_embeddings, embedding_dim, n_channels, n_res_channels, n_res_layers,
-                 ema=False, ema_decay=0.99, ema_eps=1e-5, **kwargs):   # keep kwargs so can load from config with arbitrary other args
+                 ema=False, ema_decay=0.99, ema_eps=1e-5, cond_x_top=False, **kwargs):   # keep kwargs so can load from config with arbitrary other args
         super().__init__()
         self.ema = ema
-
+        print('input_dims', input_dims)
         self.enc1 = nn.Sequential(nn.Conv2d(input_dims[0], n_channels//2, kernel_size=4, stride=2, padding=1),
                                   nn.ReLU(True),
                                   nn.Conv2d(n_channels//2, n_channels, kernel_size=4, stride=2, padding=1),
@@ -241,8 +242,11 @@ class VQVAE2(nn.Module):
                                   nn.ReLU(True),
                                   nn.Sequential(*[ResidualLayer(n_channels, n_res_channels) for _ in range(n_res_layers)]),
                                   nn.ConvTranspose2d(n_channels, embedding_dim, kernel_size=4, stride=2, padding=1))
-
-        self.dec1 = nn.Sequential(nn.Conv2d(2*embedding_dim, n_channels, kernel_size=3, padding=1),
+        if cond_x_top:
+            in_channels = 2*embedding_dim + 2
+        else:
+            in_channels = 2*embedding_dim
+        self.dec1 = nn.Sequential(nn.Conv2d(in_channels, n_channels, kernel_size=3, padding=1),
                                   nn.ReLU(True),
                                   nn.Sequential(*[ResidualLayer(n_channels, n_res_channels) for _ in range(n_res_layers)]),
                                   nn.ConvTranspose2d(n_channels, n_channels//2, kernel_size=4, stride=2, padding=1),
@@ -254,6 +258,7 @@ class VQVAE2(nn.Module):
 
         self.vq1 = VQ(n_embeddings, embedding_dim, ema, ema_decay, ema_eps)
         self.vq2 = VQ(n_embeddings, embedding_dim, ema, ema_decay, ema_eps)
+        self.cond_x_top = cond_x_top
 
     def encode(self, x):
         z1 = self.enc1(x)
@@ -281,7 +286,7 @@ class VQVAE2(nn.Module):
         encoding_indices1, zq1 = self.vq1(vq1_input)
         return (encoding_indices1, encoding_indices2), (zq1, zq2)
 
-    def decode(self, z_e, z_q):
+    def decode(self, z_e, z_q, x_top=None):
         # unpack inputs
         zq1, zq2 = z_q
         if z_e is not None:
@@ -293,14 +298,22 @@ class VQVAE2(nn.Module):
         # upsample quantized2 to match spacial dim of quantized1
         zq2_upsampled = self.upsample_to_dec1(zq2)
         # decode
-        combined_latents = torch.cat([zq1, zq2_upsampled], 1)
+        if x_top is not None:
+            assert x_top.shape[1:] == (1, 4, 32), x_top.shape
+            combined_latents = torch.cat([zq1, zq2_upsampled, torch.reshape(x_top, (-1, 2, 8, 8))], 1)
+        else:
+            combined_latents = torch.cat([zq1, zq2_upsampled], 1)
         return self.dec1(combined_latents)
 
     def forward(self, x, commitment_cost, writer=None):
         # Figure 2a in paper
         z_e = self.encode(x)
         encoding_indices, z_q = self.quantize(z_e)
-        recon_x = self.decode(z_e, z_q)
+        if self.cond_x_top:
+            x_top = x[:, :, :4]
+            recon_x = self.decode(z_e, z_q, x_top)
+        else:
+            recon_x = self.decode(z_e, z_q)
 
         # compute loss over the hierarchy -- cf eq 2 in paper
         recon_loss    = F.mse_loss(recon_x, x)
@@ -333,11 +346,13 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, writer, args):
 
     with tqdm(total=len(dataloader), desc='epoch {}/{}'.format(epoch, args.start_epoch + args.n_epochs)) as pbar:
         # for x, _ in dataloader:
+        # for x in dataloader:
         for x in dataloader:
             args.step += 1
 
-            loss = model(x[0].to(args.device), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
             # loss = model(x.to(args.device), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
+            # loss = model(x[0].to(args.device, non_blocking=True), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
+            loss = model(x, args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
 
             optimizer.zero_grad()
             loss.backward()
@@ -347,12 +362,20 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, writer, args):
             pbar.set_postfix(loss='{:.4f}'.format(loss.item()))
             pbar.update()
 
-def show_recons_from_hierarchy(model, n_samples, x, z_q, recon_x=None):
+def show_recons_from_hierarchy(model, n_samples, x, z_q, recon_x=None, args=None):
     # full reconstruction
     if recon_x is None:
-        recon_x = model.decode(None, z_q)
+        if args.cond_x_top:
+            x_top = x[:, :, :4]
+            recon_x = model.decode(None, z_q, x_top)
+        else:
+            recon_x = model.decode(None, z_q)
     # top level only reconstruction -- no contribution from bottom-level (level1) latents
-    recon_top = model.decode(None, (z_q[0].fill_(0), z_q[1]))
+    if args.cond_x_top:
+        x_top = x[:, :, :4]
+        recon_top = model.decode(None, (z_q[0].fill_(0), z_q[1]), x_top)
+    else:
+        recon_top = model.decode(None, (z_q[0].fill_(0), z_q[1]))
 
     # construct image grid
     x = make_grid(x[:n_samples].cpu(), normalize=True)
@@ -368,21 +391,48 @@ def evaluate(model, dataloader, args):
     model.eval()
 
     recon_loss = 0
-    for x, _ in tqdm(dataloader):
-        x = x[0].to(args.device)
+    # for x, _ in tqdm(dataloader):
+    for x in tqdm(dataloader):
+        # x = x[0].to(args.device, non_blocking=True)
+        x = x.to(args.device, non_blocking=True)
         z_e = model.encode(x)
         encoding_indices, z_q = model.quantize(z_e)
-        recon_x = model.decode(z_e, z_q)
+        if args.cond_x_top:
+            x_top = x[:, :, :4]
+            recon_x = model.decode(z_e, z_q, x_top)
+        else:
+            recon_x = model.decode(z_e, z_q)
         recon_loss += F.mse_loss(recon_x, x).item()
     recon_loss /= len(dataloader)
 
     # reconstruct
-    recon_image = show_recons_from_hierarchy(model, args.n_samples, x, z_q, recon_x)
+    recon_image = show_recons_from_hierarchy(model, args.n_samples, x, z_q, recon_x, args)
     return recon_image, recon_loss
 
 def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
+    # train_data = []
+    # i = 0
+    # for x in train_dataloader:
+    #     i += 1
+    #     print(i)
+    #     train_data.append(x[0].to(args.device, non_blocking=True))
+    
+    # torch.save(train_data, 'train_data.pt')
+    
+    # valid_data = []
+    # i = 0
+    # for x in valid_dataloader:
+    #     i += 1
+    #     print(i)
+    #     valid_data.append(x[0].to(args.device, non_blocking=True))
+    
+    # torch.save(valid_data, 'valid_data.pt')
+    train_data = torch.load('train_data.pt')
+    valid_data = torch.load('valid_data.pt')
+
     for epoch in range(args.start_epoch, args.start_epoch + args.n_epochs):
-        train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
+        # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
+        train_epoch(model, train_data, optimizer, scheduler, epoch, writer, args)
 
         # save model
         torch.save({'epoch': epoch,
@@ -394,7 +444,8 @@ def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, sch
 
         if (epoch+1) % args.eval_interval == 0:
             # evaluate
-            recon_image, recon_loss = evaluate(model, valid_dataloader, args)
+            # recon_image, recon_loss = evaluate(model, valid_dataloader, args)
+            recon_image, recon_loss = evaluate(model, valid_data, args)
             print('Evaluate -- recon loss: {:.4f}'.format(recon_loss))
             writer.add_scalar('loss_recon_eval', recon_loss, args.step)
             writer.add_image('eval_reconstructions', recon_image, args.step)
@@ -413,9 +464,8 @@ if __name__ == '__main__':
         args.output_dir = './results/{}/{}'.format(os.path.splitext(__file__)[0], time.strftime('%Y-%m-%d_%H-%M-%S', time.gmtime()))
     writer = SummaryWriter(log_dir = args.output_dir)
 
-    os.makedirs(args.output_dir, exist_ok=False)
-
     args.device = 'cuda:{}'.format(args.cuda) if args.cuda is not None and torch.cuda.is_available() else 'cpu'
+    print(args.device)
 
     torch.manual_seed(args.seed)
 
