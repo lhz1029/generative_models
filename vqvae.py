@@ -378,8 +378,9 @@ def show_recons_from_hierarchy(model, n_samples, x, z_q, recon_x=None, args=None
         recon_top = model.decode(None, (z_q[0].fill_(0), z_q[1]))
 
     # construct image grid
-    x = make_grid(x[:n_samples].cpu(), normalize=True)
     import numpy as np
+    np.save('x_before.npy', x[:n_samples].cpu())
+    x = make_grid(x[:n_samples].cpu(), normalize=True)
     np.save('x.npy', x.numpy())
     recon_x = make_grid(recon_x[:n_samples].cpu(), normalize=True)
     recon_top = make_grid(recon_top[:n_samples].cpu(), normalize=True)
@@ -391,9 +392,12 @@ def evaluate(model, dataloader, args):
     model.eval()
 
     recon_loss = 0
+    x_init = None
     # for x, _ in tqdm(dataloader):
     for x in tqdm(dataloader):
         # x = x[0].to(args.device, non_blocking=True)
+        if x_init is None:
+            x_init = x
         x = x.to(args.device, non_blocking=True)
         z_e = model.encode(x)
         encoding_indices, z_q = model.quantize(z_e)
@@ -406,7 +410,7 @@ def evaluate(model, dataloader, args):
     recon_loss /= len(dataloader)
 
     # reconstruct
-    recon_image = show_recons_from_hierarchy(model, args.n_samples, x, z_q, recon_x, args)
+    recon_image = show_recons_from_hierarchy(model, args.n_samples, x_init, z_q, recon_x, args)
     return recon_image, recon_loss
 
 def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
