@@ -68,6 +68,7 @@ class ChestDataset(Dataset):
     def __len__(self):
         return self._num_image
 
+    # def load_image(self, idx):
     def __getitem__(self, idx):
         image = cv2.imread(self._image_paths[idx], 0)
         # print(self._image_paths[idx])
@@ -103,11 +104,16 @@ class ChestDataset(Dataset):
                 label_hosp_oh[label_hosp] = 1
                 return (image, label_hosp_oh.astype(np.float32))
             else:
-                return (image, labels)
+                label_oh = np.zeros(2)  # TODO don't hardcode
+                label_oh[labels] = 1
+                return (image, label_oh.astype(np.float32))
         elif self._mode == 'output':
             return (image, path)
         else:
             raise Exception('Unknown mode : {}'.format(self._mode))
+
+    # def __getitem__(self, idx):
+    #     return self.data[idx]
 
     def upsample(self):
         # if self._mode == 'train' and upsample:
@@ -303,6 +309,11 @@ class JointDataset(MultipleDomainDataset):
         cxr_test.input_shape=hparams['input_shape']
         cxr_test.aug_transform = hparams.get('aug_transform', False)
 
+
+        # cxr_train.data = [cxr_train.load_image(i) for i in range(cxr_train._num_image)]
+        # cxr_train.data = [(img.to('cuda:0'), cond.to('cuda:0')) for img, cond in cxr_train.data]
+        # cxr_test.data = [cxr_test.load_image(i) for i in range(cxr_test._num_image)]
+        # cxr_test.data = [(img.to('cuda:0'), cond.to('cuda:0')) for img, cond in cxr_test.data]
         self.datasets = [cxr_train, cxr_test]
         print('Datasets generated with Y means {}, {}'.format(
             cxr_train._labels.mean(), cxr_test._labels.mean()))
@@ -316,8 +327,8 @@ class JointDataset(MultipleDomainDataset):
 class CheXpertDataset(ChestDataset):
     def __init__(self, label_path, cfg=domainbed_path + '/configs/chexpert_config.json', mode='train', upsample=True, subset=True, input_shape=(1, 64, 64), aug_transform=False):
         assert mode in ['train', 'val', 'dry'], 'only train, val, dry allows as mode'
-        # self._hosp = None
-        self._hosp = 'chexpert'
+        self._hosp = None
+        # self._hosp = 'chexpert'
         self.input_shape = input_shape
         self.aug_transform = aug_transform
         def get_labels(labels):
@@ -387,8 +398,8 @@ class CheXpertDataset(ChestDataset):
 class MimicCXRDataset(ChestDataset):
     def __init__(self, label_path, cfg=domainbed_path+'/configs/mimic_config.json', mode='train', upsample=True, subset=True, input_shape=[1,64,64], aug_transform=False):
         assert mode in ['train', 'val', 'dry'], 'only train, val, dry allows as mode'
-        # self._hosp = None
-        self._hosp = 'mimic'
+        self._hosp = None
+        # self._hosp = 'mimic'
         self.input_shape = input_shape
         self.aug_transform = aug_transform
         def get_labels(labels):
@@ -843,10 +854,4 @@ class Debug28(Debug):
 
 # class chestXR(MultipleEnvironmentImageFolder):
 #     CHECKPOINT_FREQ = 1000
-#     ENVIRONMENTS = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
-#     def __init__(self, root, test_envs, hparams):
-#         self.dir = ['/beegfs/wz727/mimic-cxr',
-#                     '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
-#                     '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
-#                     '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
-#         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
+#  

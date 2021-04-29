@@ -392,12 +392,10 @@ def evaluate(model, dataloader, args):
     model.eval()
 
     recon_loss = 0
-    x_init = None
+    reconstructed_img = False
     # for x, _ in tqdm(dataloader):
     for x in tqdm(dataloader):
         # x = x[0].to(args.device, non_blocking=True)
-        if x_init is None:
-            x_init = x
         x = x.to(args.device, non_blocking=True)
         z_e = model.encode(x)
         encoding_indices, z_q = model.quantize(z_e)
@@ -407,10 +405,13 @@ def evaluate(model, dataloader, args):
         else:
             recon_x = model.decode(z_e, z_q)
         recon_loss += F.mse_loss(recon_x, x).item()
+
+        # reconstruct from the first batch
+        if not reconstructed_img:
+            recon_image = show_recons_from_hierarchy(model, args.n_samples, x, z_q, recon_x, args)
+            reconstructed_img = True
     recon_loss /= len(dataloader)
 
-    # reconstruct
-    recon_image = show_recons_from_hierarchy(model, args.n_samples, x_init, z_q, recon_x, args)
     return recon_image, recon_loss
 
 def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):

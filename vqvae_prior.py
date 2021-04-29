@@ -80,6 +80,7 @@ parser.add_argument('--cond_x_top', type=bool, default=False)
 def extract_codes_from_dataloader(vqvae, dataloader, dataset_path):
     """ encode image inputs with vqvae and extract field of discrete latents (the embedding indices in the codebook with closest l2 distance) """
     device = next(vqvae.parameters()).device
+    print('device', device)
     e1s, e2s, ys = [], [], []
     for x, y in tqdm(dataloader):
         z_e = vqvae.encode(x.to(device))
@@ -89,7 +90,7 @@ def extract_codes_from_dataloader(vqvae, dataloader, dataset_path):
         e1s.append(e1)
         e2s.append(e2)
         ys.append(y)
-    return TensorDataset(torch.cat(e1s).cpu(), torch.cat(e2s).cpu(), torch.cat(ys))
+    return TensorDataset(torch.cat(e1s).to(device), torch.cat(e2s).to(device), torch.cat(ys).to(device))
 
 def maybe_extract_codes(vqvae, args, train):
     """ construct datasets of vqvae encodings and class conditional labels -- each dataset entry is [encodings level 1 (bottom), encodings level 2 (top), class label vector] """
@@ -98,7 +99,14 @@ def maybe_extract_codes(vqvae, args, train):
     if not os.path.exists(dataset_path):
         print('Extracting codes for {} data ...'.format('train' if train else 'valid'))
         dataloader = fetch_vqvae_dataloader(args, train)
-        dataset = extract_codes_from_dataloader(vqvae, dataloader, dataset_path)
+        train_data = []
+        i = 0
+        for x in dataloader:
+            i += 1
+            print(i)
+            train_data.append((x[0].to(args.device, non_blocking=True), x[1].to(args.device, non_blocking=True)))
+        # dataset = extract_codes_from_dataloader(vqvae, dataloader, dataset_path)
+        dataset = extract_codes_from_dataloader(vqvae, train_data, dataset_path)
         torch.save(dataset, dataset_path)
     else:
         dataset = torch.load(dataset_path)
@@ -179,6 +187,7 @@ class GatedResidualLayer(nn.Module):
             c1 = self.dropout(c1)
         c2 = self.c2(c1)
         if y is not None:
+            # print('y.shape', y.shape)
             c2 += self.proj_y(y)[:,:,None,None]
         a, b = c2.chunk(2,1)
         out = x + a * torch.sigmoid(b)
@@ -384,7 +393,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, writer, args):
     model.train()
 
     tic = time.time()
-    if args.on_main_process: pbar = tqdm(total=len(dataloader), desc='epoch {}/{}'.format(epoch, args.start_epoch + args.n_epochs))
+    if args.on_main_process: pbar = tqdm(total=len(dataloader), desc='epoch {}/{}'.format(epoch, args.n_epochs))
     for e1, e2, y in dataloader:
         args.step += args.world_size
 
@@ -448,7 +457,7 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
         print(i)
         train_data.append((x[0].to(args.device, non_blocking=True), x[1].to(args.device, non_blocking=True), x[2].to(args.device, non_blocking=True)))
     
-    torch.save(train_data, 'train_data_prior.pt')
+    torch.save(train_data, os.path.join(args.output_dir, 'train_data_prior.pt'))
     
     valid_data = []
     i = 0
@@ -457,11 +466,11 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
         print(i)
         valid_data.append((x[0].to(args.device, non_blocking=True), x[1].to(args.device, non_blocking=True), x[2].to(args.device, non_blocking=True)))
     
-    torch.save(valid_data, 'valid_data_prior.pt')
+    torch.save(valid_data,  os.path.join(args.output_dir, 'valid_data_prior.pt'))
     
     x_dataloader = fetch_vqvae_dataloader(args, train=False)
 
-    for epoch in range(args.start_epoch, args.start_epoch + args.n_epochs):
+    for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
         train_epoch(model, train_data, optimizer, scheduler, epoch, writer, args)
 
@@ -538,7 +547,8 @@ def generate(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
         else:
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)))]
     samples = torch.cat(samples)
-    return make_grid(samples, normalize=True, scale_each=True)
+    return samples
+    # return make_grid(samples, normalize=True, scale_each=True)
 
 def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=None):
     if args.which_prior == 'top':
@@ -564,6 +574,8 @@ def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=No
         bottom_gt, top_gt, y = next(iter(dataloader))  # take e2 and y from dataloader output (e1,e2,y)
         bottom_gt, top_gt, y = bottom_gt[:args.n_samples].to(args.device), top_gt[:args.n_samples].to(args.device), y[:args.n_samples].to(args.device)
         # sample bottom prior
+        args.input_dims = [img_dims, [img_dims[0]//4, img_dims[1]//4], [img_dims[0]//8, img_dims[1]//8]]
+        print('args.input_dims[1]', args.input_dims[1])
         bottom_samples = sample_prior(model, preprocess(top_gt, args.n_bits), y, args.n_samples, args.input_dims[1], args.n_bits)
         # decode
         # stack (1) recon using bottom+top actual latents,
@@ -600,7 +612,8 @@ if __name__ == '__main__':
                     '_outstack{n_out_stack_layers}_drop{drop_rate}' + \
                     '_{}'.format(time.strftime('%Y-%m-%d_%H-%M', time.gmtime()))
         args.output_dir = './results/{}/{}'.format(os.path.splitext(__file__)[0], exp_name.format(**args.__dict__))
-    os.makedirs(args.output_dir, exist_ok=False)
+    # os.makedirs(args.output_dir, exist_ok=False)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # setup device and distributed training
     if args.distributed:
@@ -692,6 +705,7 @@ if __name__ == '__main__':
     if args.generate:
         assert args.which_prior is None, 'Remove `which_prior` to load both priors and generate'
 #        optimizer.use_ema(True)
+        # samples = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes + 1, args.n_cond_classes).to(args.device))
         samples = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes + 1, args.n_cond_classes).to(args.device))
         if args.distributed:
             torch.manual_seed(args.rank)
@@ -700,7 +714,8 @@ if __name__ == '__main__':
             torch.distributed.all_gather(tensors, samples)  # collect samples tensor from all processes onto main process cpu
             samples = torch.cat(tensors, 2)
         if args.on_main_process:
-            samples = samples.cpu()
-            writer.add_image('samples', samples, args.step)
-            save_image(samples.cpu(), os.path.join(args.output_dir, 'generation_sample_step_{}.png'.format(args.step)))
+            # samples = samples.cpu()
+            # writer.add_image('samples', samples, args.step)
+            # save_image(samples.cpu(), os.path.join(args.output_dir, 'generation_sample_step_{}.png'.format(args.step)))
+            torch.save(samples, os.path.join(args.vqvae_dir, 'generated_data.pt'))
 
