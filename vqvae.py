@@ -300,6 +300,7 @@ class VQVAE2(nn.Module):
         # decode
         if x_top is not None:
             assert x_top.shape[1:] == (1, 4, 32), x_top.shape
+            print('shapes', zq1.shape, zq2_upsampled.shape, torch.reshape(x_top, (-1, 2, 8, 8)).shape)
             combined_latents = torch.cat([zq1, zq2_upsampled, torch.reshape(x_top, (-1, 2, 8, 8))], 1)
         else:
             combined_latents = torch.cat([zq1, zq2_upsampled], 1)
