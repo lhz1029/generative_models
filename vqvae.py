@@ -73,6 +73,7 @@ parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
 parser.add_argument('--cond_x_top', type=bool, default=False)
 
+
 # --------------------
 # Data and model loading
 # --------------------
@@ -300,7 +301,7 @@ class VQVAE2(nn.Module):
         # decode
         if x_top is not None:
             assert x_top.shape[1:] == (1, 4, 32), x_top.shape
-            print('shapes', zq1.shape, zq2_upsampled.shape, torch.reshape(x_top, (-1, 2, 8, 8)).shape)
+            # print('shapes', zq1.shape, zq2_upsampled.shape, torch.reshape(x_top, (-1, 2, 8, 8)).shape)
             combined_latents = torch.cat([zq1, zq2_upsampled, torch.reshape(x_top, (-1, 2, 8, 8))], 1)
         else:
             combined_latents = torch.cat([zq1, zq2_upsampled], 1)
@@ -468,6 +469,7 @@ if __name__ == '__main__':
         args.output_dir = args.restore_dir
     if not args.output_dir:  # if not given use results/file_name/time_stamp
         args.output_dir = './results/{}/{}'.format(os.path.splitext(__file__)[0], time.strftime('%Y-%m-%d_%H-%M-%S', time.gmtime()))
+    os.makedirs(args.output_dir, exist_ok=False)
     writer = SummaryWriter(log_dir = args.output_dir)
 
     args.device = 'cuda:{}'.format(args.cuda) if args.cuda is not None and torch.cuda.is_available() else 'cpu'
