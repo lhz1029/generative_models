@@ -460,9 +460,6 @@ def evaluate(model, dataloader, args):
 def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
     if os.path.exists(os.path.join(args.output_dir, 'train_data_prior.pt')):
         train_data = torch.load(os.path.join(args.output_dir, 'train_data_prior.pt'))
-        valid_data = torch.load(os.path.join(args.output_dir, 'valid_data_prior.pt'))
-        x_data = torch.load(os.path.join(args.output_dir, 'x_data_prior.pt'))
-
     else:
         train_data = []
         i = 0
@@ -472,7 +469,10 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
             train_data.append((x[0].to(args.device, non_blocking=True), x[1].to(args.device, non_blocking=True), x[2].to(args.device, non_blocking=True)))
         
         torch.save(train_data, os.path.join(args.output_dir, 'train_data_prior.pt'))
-        
+
+    if os.path.exists(os.path.join(args.output_dir, 'valid_data_prior.pt')):
+        valid_data = torch.load(os.path.join(args.output_dir, 'valid_data_prior.pt'))
+    else:
         valid_data = []
         i = 0
         for x in valid_dataloader:
@@ -481,7 +481,10 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
             valid_data.append((x[0].to(args.device, non_blocking=True), x[1].to(args.device, non_blocking=True), x[2].to(args.device, non_blocking=True)))
         
         torch.save(valid_data,  os.path.join(args.output_dir, 'valid_data_prior.pt'))
-        
+
+    if os.path.exists(os.path.join(args.output_dir, 'x_data_prior.pt')):
+        x_data = torch.load(os.path.join(args.output_dir, 'x_data_prior.pt'))
+    else:
         x_dataloader = fetch_vqvae_dataloader(args, train=False)
         x_data = []
         i = 0
