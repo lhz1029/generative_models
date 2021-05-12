@@ -12,6 +12,12 @@ python vqvae.py --train --n_embeddings 64 --n_epochs 60 --ema --cuda 0 --dataset
 python vqvae_prior.py --vqvae_dir joint_dz_quick --train --n_epochs 50 --batch_size 256 --lr 0.00005 --which_prior top  --n_cond_classes 2 --n_channels 128 --n_res_layers 5 --n_out_stack_layers 10 --n_cond_stack_layers 0 --drop_rate 0.1 --cuda 0 --output_dir joint_dz_quick_prio --cond_x_top true && \
 python vqvae_prior.py --vqvae_dir joint_dz_quick --train --n_epochs 50 --batch_size 256 --lr 0.00005 --which_prior bottom --n_cond_classes 2 --n_channels 128 --n_res_layers 20 --n_out_stack_layers 0 --n_cond_stack_layers 10 --drop_rate 0.1 --output_dir joint_dz_quick_prior_bottom  --cuda 0 --cond_x_top true
 
+
+python vqvae.py --train --n_embeddings 64 --n_epochs 60 --ema --cuda 0 --dataset joint_chest --output_dir joint_dz_quick_rho.8 --cond_x_top true --rho .8 && \
+python vqvae_prior.py --vqvae_dir joint_dz_quick_rho.8 --train --n_epochs 50 --batch_size 256 --lr 0.00005 --which_prior top  --n_cond_classes 2 --n_channels 128 --n_res_layers 5 --n_out_stack_layers 10 --n_cond_stack_layers 0 --drop_rate 0.1 --cuda 0 --output_dir joint_dz_quick_rho.8_prior --cond_x_top true --rho .8 && \
+python vqvae_prior.py --vqvae_dir joint_dz_quick_rho.8 --train --n_epochs 50 --batch_size 256 --lr 0.00005 --which_prior bottom --n_cond_classes 2 --n_channels 128 --n_res_layers 20 --n_out_stack_layers 0 --n_cond_stack_layers 10 --drop_rate 0.1 --output_dir joint_dz_quick_rho.8_prior_bottom  --cuda 0 --cond_x_top true --rho .8
+
+
 # python -m torch.distributed.launch --nproc_per_node 4 --use_env \
 # ERM dh
 python \

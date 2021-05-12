@@ -72,6 +72,7 @@ parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
 parser.add_argument('--cond_x_top', type=bool, default=False)
+parser.add_argument('--rho', type=float, default=.9)
 
 # parser.add_argument('--cond_x_top_prior', type=bool, default=False)
 parser.add_argument('--y_from_data', type=bool, default=False)

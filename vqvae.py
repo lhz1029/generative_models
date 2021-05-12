@@ -72,6 +72,7 @@ parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
 parser.add_argument('--cond_x_top', type=bool, default=False)
+parser.add_argument('--rho', type=float, default=.9)
 
 
 # --------------------
@@ -97,7 +98,7 @@ def fetch_vqvae_dataloader(args, train=True):
         hparams['upsample'] = False
         hparams['input_shape'] = args.input_shape # (1, 32, 32)
         hparams['batch_size'] = args.batch_size
-        hparams['rho'] = .9 if train else .5 # correlation between label and hospital
+        hparams['rho'] = args.rho if train else .5 # correlation between label and hospital
         hparams['hosp'] = args.hosp # return y is now combination of hospital and label
         if args.dry:
             mode = 'dry'
@@ -417,25 +418,25 @@ def evaluate(model, dataloader, args):
     return recon_image, recon_loss
 
 def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
-    # train_data = []
-    # i = 0
-    # for x in train_dataloader:
-    #     i += 1
-    #     print(i)
-    #     train_data.append(x[0].to(args.device, non_blocking=True))
+    train_data = []
+    i = 0
+    for x in train_dataloader:
+        i += 1
+        print(i)
+        train_data.append(x[0].to(args.device, non_blocking=True))
     
-    # torch.save(train_data, 'train_data.pt')
+    torch.save(train_data, 'train_data_rho.8.pt')
     
-    # valid_data = []
-    # i = 0
-    # for x in valid_dataloader:
-    #     i += 1
-    #     print(i)
-    #     valid_data.append(x[0].to(args.device, non_blocking=True))
+    valid_data = []
+    i = 0
+    for x in valid_dataloader:
+        i += 1
+        print(i)
+        valid_data.append(x[0].to(args.device, non_blocking=True))
     
-    # torch.save(valid_data, 'valid_data.pt')
-    train_data = torch.load('train_data.pt')
-    valid_data = torch.load('valid_data.pt')
+    torch.save(valid_data, 'valid_data_rho.8.pt')
+    # train_data = torch.load('train_data.pt')
+    # valid_data = torch.load('valid_data.pt')
 
     for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
