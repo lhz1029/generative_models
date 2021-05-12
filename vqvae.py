@@ -73,6 +73,7 @@ parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
 parser.add_argument('--cond_x_top', type=bool, default=False)
 parser.add_argument('--rho', type=float, default=.9)
+parser.add_argument('--rho_same', type=bool, default=False)
 
 
 # --------------------
@@ -98,7 +99,7 @@ def fetch_vqvae_dataloader(args, train=True):
         hparams['upsample'] = False
         hparams['input_shape'] = args.input_shape # (1, 32, 32)
         hparams['batch_size'] = args.batch_size
-        hparams['rho'] = args.rho if train else .5 # correlation between label and hospital
+        hparams['rho'] = args.rho if train or args.rho_same else .5 # correlation between label and hospital
         hparams['hosp'] = args.hosp # return y is now combination of hospital and label
         if args.dry:
             mode = 'dry'
