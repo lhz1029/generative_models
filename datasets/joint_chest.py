@@ -96,13 +96,16 @@ class ChestDataset(Dataset):
         path = self._image_paths[idx]
         if self._mode == 'train' or self._mode == 'val' or self._mode == 'test' or self._mode == 'dry':
             if self._hosp is not None:
-                # hosp = torch.Tensor(np.array([self._hosp[idx]]).astype(np.float32))
-                # hosp = torch.Tensor(np.array(self._hosp[idx]))
-                hosp = np.array(self._hosp[idx])
-                label_hosp = labels * 2 + hosp
-                label_hosp_oh = np.zeros(4)  # TODO don't hardcode
-                label_hosp_oh[label_hosp] = 1
-                return (image, label_hosp_oh.astype(np.float32))
+                hosp = torch.Tensor(np.array([self._hosp[idx]]).astype(np.float32))
+                hosp = torch.Tensor(np.array(self._hosp[idx]))
+                label_oh = np.zeros(2)  # TODO don't hardcode
+                label_oh[labels] = 1
+                return (image, label_oh.astype(np.float32), hosp)
+                # hosp = np.array(self._hosp[idx])
+                # label_hosp = labels * 2 + hosp
+                # label_hosp_oh = np.zeros(4)  # TODO don't hardcode
+                # label_hosp_oh[label_hosp] = 1
+                # return (image, label_hosp_oh.astype(np.float32))
             else:
                 label_oh = np.zeros(2)  # TODO don't hardcode
                 label_oh[labels] = 1

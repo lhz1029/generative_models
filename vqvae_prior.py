@@ -482,18 +482,19 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
         
         torch.save(valid_data,  os.path.join(args.output_dir, 'valid_data_prior.pt'))
 
-    if os.path.exists(os.path.join(args.output_dir, 'x_data_prior.pt')):
-        x_data = torch.load(os.path.join(args.output_dir, 'x_data_prior.pt'))
+    if os.path.exists('x_data_prior_hosp.pt'):
+        x_data = torch.load('x_data_prior_hosp.pt')
     else:
+        print("creating x_data_prior_hosp.pt")
         x_dataloader = fetch_vqvae_dataloader(args, train=False)
         x_data = []
         i = 0
-        for x, y in x_dataloader:
+        for x, y, hosp in x_dataloader:
             i += 1
             print(i)
-            x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True)))
+            x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
         
-        torch.save(x_data,  os.path.join(args.output_dir, 'x_data_prior.pt'))
+        torch.save(x_data, 'x_data_prior_hosp.pt')
 
     for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
@@ -541,7 +542,7 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
 
 def sample_prior(model, h, y, n_samples, input_dims, n_bits):
     model.eval()
-
+    print('input_dims', input_dims)
     H,W = input_dims
     out = torch.zeros(n_samples, 1, H, W, device=next(model.parameters()).device)
     if args.on_main_process: pbar = tqdm(total=H*W, desc='Generating {} images'.format(n_samples))
@@ -559,6 +560,7 @@ def sample_prior(model, h, y, n_samples, input_dims, n_bits):
 @torch.no_grad()
 def generate(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
     samples = []
+    all_hosps = []
     labels = torch.repeat_interleave(ys, args.n_samples, 0)
     for y in ys.unsqueeze(1):  # condition on class one-hot labels; (n_samples, 1, n_cond_classes) when sliced on dim 0 returns (1,n_cond_classes)
         # sample top prior conditioned on class labels y
@@ -567,16 +569,21 @@ def generate(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
         bottom_samples = sample_prior(bottom_model, preprocess(top_samples, args.n_bits), y, args.n_samples, args.input_dims[1], args.n_bits)
         # decode
         if args.cond_x_top:
-            xs = torch.cat([x for x, y in x_dataloader], 0)
+            xs = torch.cat([x for x, y, hosp in x_dataloader], 0)
+            hosps = torch.cat([hosp for x, y, hosp in x_dataloader], 0)
             print('x.shape', xs.shape)
             random_indices = torch.randint(high=xs.shape[0], size=(args.n_samples,))
             x_top = xs[random_indices, :, :4].to(args.device)
             print('samples shape', bottom_samples.shape, top_samples.shape)
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)), x_top)]
+            all_hosps.append(hosps[random_indices])
         else:
+            assert False, "Shouldn't hit this, hosp code not tested"
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)))]
+            all_hosps.append(np.zeros(bottom_samples.shape, 1))
     samples = torch.cat(samples)
-    return samples, labels
+    all_hosps = torch.cat(all_hosps)
+    return samples, labels, all_hosps
     # return make_grid(samples, normalize=True, scale_each=True)
 
 
@@ -588,25 +595,28 @@ def get_relevant_top_rows(x_dataloader, y_label):
     assert type(x_dataloader) == list
     assert torch.sum(y_label) == 1
     # turn batched inputs into full 
-    xs = torch.cat([x for x, y in x_dataloader], 0)
-    ys = torch.cat([y for x, y in x_dataloader], 0)
+    xs = torch.cat([x for x, y, hosp in x_dataloader], 0)
+    ys = torch.cat([y for x, y, hosp in x_dataloader], 0)
+    hosps = torch.cat([hosp for x, y, hosp in x_dataloader], 0)
     y_label_num = torch.argmax(y_label)
     y_mask = torch.argmax(ys, 1) == y_label_num
     print(y_mask[:10])
-    return xs[y_mask]
+    return xs[y_mask], hosps[y_mask]
 
 @torch.no_grad()
 def generate_y_from_data(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
     samples = []
+    all_hosps = []
     labels = torch.repeat_interleave(ys, args.n_samples, 0)
     for y in ys.unsqueeze(1):  # condition on class one-hot labels; (n_samples, 1, n_cond_classes) when sliced on dim 0 returns (1,n_cond_classes)
         # sample top prior conditioned on class labels y
+        print('args.input_dims', args.input_dims)
         top_samples = sample_prior(top_model, None, y, args.n_samples, args.input_dims[2], args.n_bits)
         # sample bottom prior conditioned on top_sample codes and class labels y
         bottom_samples = sample_prior(bottom_model, preprocess(top_samples, args.n_bits), y, args.n_samples, args.input_dims[1], args.n_bits)
         # decode
         if args.cond_x_top:
-            x = get_relevant_top_rows(x_dataloader, y)
+            x, hosps = get_relevant_top_rows(x_dataloader, y)
             # if x.shape[0] < args.n_samples:
             #     x = torch.cat([x, x], dim=0)
             # print('x.shape', x.shape)
@@ -615,10 +625,14 @@ def generate_y_from_data(vqvae, bottom_model, top_model, args, ys=None, x_datalo
             indices = torch.randint(high=x.shape[0], size=(args.n_samples,))
             x_top = x[indices, :, :4].to(args.device)
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)), x_top)]
+            all_hosps.append(hosps[indices])
         else:
+            assert False, "Shouldn't hit this, hosp code not tested"
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)))]
+            all_hosps.append(np.zeros(bottom_samples.shape, 1))
     samples = torch.cat(samples)
-    return samples, labels
+    all_hosps = torch.cat(all_hosps)
+    return samples, labels, all_hosps
     # return make_grid(samples, normalize=True, scale_each=True)
 
 def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=None):
@@ -780,14 +794,28 @@ if __name__ == '__main__':
 #        optimizer.use_ema(True)
         # samples = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device))
         if args.cond_x_top:
-            x_data = torch.load(os.path.join(args.restore_dir[0], 'x_data_prior.pt'))
+            if os.path.exists('x_data_prior_hosp.pt'):
+                x_data = torch.load('x_data_prior_hosp.pt')
+            else:
+                print("creating x_data_prior_hosp.pt")
+                x_dataloader = fetch_vqvae_dataloader(args, train=False)
+                x_data = []
+                i = 0
+                for _, (x, y, hosp) in zip(range(10), x_dataloader):
+                    i += 1
+                    print(i)
+                    x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
+                
+                torch.save(x_data, 'x_data_prior_hosp.pt')
+                # have to reset this since fetch_vqvae_dataloader overwrites it
+                args.input_dims = [img_dims, [img_dims[0]//4, img_dims[1]//4], [img_dims[0]//8, img_dims[1]//8]]
         else:
             x_data = None
         if args.y_from_data:
             # TODO use y from x_data
-            samples, labels = generate_y_from_data(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_data)
+            samples, labels, hosps = generate_y_from_data(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_data)
         else:
-            samples, labels = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_data)
+            samples, labels, hosps = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_data)
         if args.distributed:
             torch.manual_seed(args.rank)
             # collect samples tensor from all processes onto main process cpu
@@ -803,7 +831,8 @@ if __name__ == '__main__':
             num_samples, channels, height, width = samples.shape
             samples = samples.reshape(-1, args.batch_size, channels, height, width)
             labels = labels.reshape(-1, args.batch_size, args.n_cond_classes)
-            generated_data = [(s, l) for s, l in zip(samples, labels)]
+            hosps = hosps.reshape(-1, args.batch_size, 1)
+            generated_data = [(s, l, h) for s, l, h in zip(samples, labels, hosps)]
             os.makedirs(args.data_output_dir, exist_ok=True)
             torch.save(generated_data, os.path.join(args.data_output_dir, 'generated_data.pt'))
 
