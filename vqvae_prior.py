@@ -576,7 +576,9 @@ def generate(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
             x_top = xs[random_indices, :, :4].to(args.device)
             print('samples shape', bottom_samples.shape, top_samples.shape)
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)), x_top)]
-            all_hosps.append(hosps[random_indices])
+            x, hosps = get_relevant_top_rows(x_dataloader, y)
+            random_hosp_indices = torch.randint(high=hosps.shape[0], size=(args.n_samples,))
+            all_hosps.append(hosps[random_hosp_indices])
         else:
             assert False, "Shouldn't hit this, hosp code not tested"
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)))]
