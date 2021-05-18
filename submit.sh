@@ -66,7 +66,8 @@ python \
                  --cond_x_top true \
                  --y_from_data true \
                  --batch_size 128 \
-                 --data_output_dir generated/vqvae_erm_quick
+                 --hosp true \
+                 --data_output_dir generated/vqvae_erm_quick_hosp
 
 
 # NURD
@@ -79,4 +80,5 @@ python \
                  --n_cond_classes 2 \
                  --cond_x_top true \
                  --batch_size 128 \
-                 --data_output_dir generated/vqvae_nurd_quick
+                 --hosp true \
+                 --data_output_dir generated/vqvae_nurd_quick_hosp
