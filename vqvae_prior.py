@@ -482,10 +482,12 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
         
         torch.save(valid_data,  os.path.join(args.output_dir, 'valid_data_prior.pt'))
 
-    if os.path.exists('x_data_prior_hosp.pt'):
-        x_data = torch.load('x_data_prior_hosp.pt')
+    # data_filename = 'x_data_prior_hosp.pt'
+    data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
+    if os.path.exists(f'{data_filename}'):
+        x_data = torch.load(f'{data_filename}')
     else:
-        print("creating x_data_prior_hosp.pt")
+        print("creating {data_filename}")
         x_dataloader = fetch_vqvae_dataloader(args, train=False)
         x_data = []
         i = 0
@@ -494,7 +496,7 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
             print(i)
             x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
         
-        torch.save(x_data, 'x_data_prior_hosp.pt')
+        torch.save(x_data, f'{data_filename}')
 
     for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
@@ -601,6 +603,7 @@ def get_relevant_top_rows(x_dataloader, y_label):
     ys = torch.cat([y for x, y, hosp in x_dataloader], 0)
     hosps = torch.cat([hosp for x, y, hosp in x_dataloader], 0)
     y_label_num = torch.argmax(y_label)
+    print(y_label_num)
     y_mask = torch.argmax(ys, 1) == y_label_num
     print(y_mask[:10])
     return xs[y_mask], hosps[y_mask]
@@ -650,7 +653,7 @@ def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=No
         top_samples = torch.cat(top_samples)
         # decode
         if args.cond_x_top:
-            x, _ = next(iter(x_dataloader))
+            x, _, _ = next(iter(x_dataloader))
             print('x.shape', x.shape)
             x_top = x[:bottom_samples.shape[0], :, :4].to(args.device)
             samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))), x_top=x_top)
@@ -795,20 +798,22 @@ if __name__ == '__main__':
         assert args.which_prior is None, 'Remove `which_prior` to load both priors and generate'
 #        optimizer.use_ema(True)
         # samples = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device))
+
+        # data_filename = 'x_data_prior_hosp.pt'
+        data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
         if args.cond_x_top:
-            if os.path.exists('x_data_prior_hosp.pt'):
-                x_data = torch.load('x_data_prior_hosp.pt')
+            if os.path.exists(f'{data_filename}'):
+                x_data = torch.load(f'{data_filename}')
             else:
-                print("creating x_data_prior_hosp.pt")
+                print(f"creating {data_filename}")
                 x_dataloader = fetch_vqvae_dataloader(args, train=False)
                 x_data = []
                 i = 0
-                for _, (x, y, hosp) in zip(range(10), x_dataloader):
+                for x, y, hosp in x_dataloader:
                     i += 1
-                    print(i)
                     x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
                 
-                torch.save(x_data, 'x_data_prior_hosp.pt')
+                torch.save(x_data, f'{data_filename}')
                 # have to reset this since fetch_vqvae_dataloader overwrites it
                 args.input_dims = [img_dims, [img_dims[0]//4, img_dims[1]//4], [img_dims[0]//8, img_dims[1]//8]]
         else:
