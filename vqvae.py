@@ -28,6 +28,7 @@ from functools import partial
 
 from datasets.chexpert import ChexpertDataset
 from datasets.joint_chest import JointDataset
+from utils import holemask
 
 parser = argparse.ArgumentParser()
 # action
@@ -71,7 +72,7 @@ parser.add_argument('--n_samples', type=int, default=64, help='Number of samples
 parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
-parser.add_argument('--cond_x_top', type=bool, default=False)
+parser.add_argument('--cond_x', type=str, default="none")
 parser.add_argument('--rho', type=float, default=.9)
 parser.add_argument('--rho_same', type=bool, default=False)
 
@@ -221,7 +222,7 @@ class ResidualLayer(nn.Sequential):
 
 class VQVAE2(nn.Module):
     def __init__(self, input_dims, n_embeddings, embedding_dim, n_channels, n_res_channels, n_res_layers,
-                 ema=False, ema_decay=0.99, ema_eps=1e-5, cond_x_top=False, **kwargs):   # keep kwargs so can load from config with arbitrary other args
+                 ema=False, ema_decay=0.99, ema_eps=1e-5, cond_x="none", **kwargs):   # keep kwargs so can load from config with arbitrary other args
         super().__init__()
         self.ema = ema
         print('input_dims', input_dims)
@@ -245,8 +246,10 @@ class VQVAE2(nn.Module):
                                   nn.ReLU(True),
                                   nn.Sequential(*[ResidualLayer(n_channels, n_res_channels) for _ in range(n_res_layers)]),
                                   nn.ConvTranspose2d(n_channels, embedding_dim, kernel_size=4, stride=2, padding=1))
-        if cond_x_top:
+        if cond_x == "top":
             in_channels = 2*embedding_dim + 2
+        elif cond_x == "outer":
+            in_channels = 2*embedding_dim + 16
         else:
             in_channels = 2*embedding_dim
         self.dec1 = nn.Sequential(nn.Conv2d(in_channels, n_channels, kernel_size=3, padding=1),
@@ -261,7 +264,7 @@ class VQVAE2(nn.Module):
 
         self.vq1 = VQ(n_embeddings, embedding_dim, ema, ema_decay, ema_eps)
         self.vq2 = VQ(n_embeddings, embedding_dim, ema, ema_decay, ema_eps)
-        self.cond_x_top = cond_x_top
+        self.cond_x = cond_x
 
     def encode(self, x):
         z1 = self.enc1(x)
@@ -302,9 +305,13 @@ class VQVAE2(nn.Module):
         zq2_upsampled = self.upsample_to_dec1(zq2)
         # decode
         if x_top is not None:
-            assert x_top.shape[1:] == (1, 4, 32), x_top.shape
-            # print('shapes', zq1.shape, zq2_upsampled.shape, torch.reshape(x_top, (-1, 2, 8, 8)).shape)
-            combined_latents = torch.cat([zq1, zq2_upsampled, torch.reshape(x_top, (-1, 2, 8, 8))], 1)
+            if self.cond_x == "top":
+                assert x_top.shape[1:] == (1, 4, 32), x_top.shape
+                # print('shapes', zq1.shape, zq2_upsampled.shape, torch.reshape(x_top, (-1, 2, 8, 8)).shape)
+                combined_latents = torch.cat([zq1, zq2_upsampled, torch.reshape(x_top, (-1, 2, 8, 8))], 1)
+            elif self.cond_x == "outer":
+                assert x_top.shape[1:] == (1, 32, 32), x_top.shape
+                combined_latents = torch.cat([zq1, zq2_upsampled, torch.reshape(x_top, (-1, 16, 8, 8))], 1)
         else:
             combined_latents = torch.cat([zq1, zq2_upsampled], 1)
         return self.dec1(combined_latents)
@@ -313,9 +320,12 @@ class VQVAE2(nn.Module):
         # Figure 2a in paper
         z_e = self.encode(x)
         encoding_indices, z_q = self.quantize(z_e)
-        if self.cond_x_top:
+        if self.cond_x == "top":
             x_top = x[:, :, :4]
             recon_x = self.decode(z_e, z_q, x_top)
+        elif self.cond_x == "outer":
+            x_outer = holemask(x)
+            recon_x = self.decode(z_e, z_q, x_outer)
         else:
             recon_x = self.decode(z_e, z_q)
 
@@ -369,14 +379,20 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, writer, args):
 def show_recons_from_hierarchy(model, n_samples, x, z_q, recon_x=None, args=None):
     # full reconstruction
     if recon_x is None:
-        if args.cond_x_top:
-            x_top = x[:, :, :4]
+        if args.cond_x in ["top", "outer"]:
+            if args.cond_x == "top":
+                x_top = x[:, :, :4]
+            elif args.cond_x == "outer":
+                x_top = holemask(x)
             recon_x = model.decode(None, z_q, x_top)
         else:
             recon_x = model.decode(None, z_q)
     # top level only reconstruction -- no contribution from bottom-level (level1) latents
-    if args.cond_x_top:
-        x_top = x[:, :, :4]
+    if args.cond_x in ["top", "outer"]:
+        if args.cond_x == "top":
+            x_top = x[:, :, :4]
+        elif args.cond_x == "outer":
+            x_top = holemask(x)
         recon_top = model.decode(None, (z_q[0].fill_(0), z_q[1]), x_top)
     else:
         recon_top = model.decode(None, (z_q[0].fill_(0), z_q[1]))
@@ -403,8 +419,11 @@ def evaluate(model, dataloader, args):
         x = x.to(args.device, non_blocking=True)
         z_e = model.encode(x)
         encoding_indices, z_q = model.quantize(z_e)
-        if args.cond_x_top:
-            x_top = x[:, :, :4]
+        if args.cond_x in ["top", "outer"]:
+            if args.cond_x == "top":
+                x_top = x[:, :, :4]
+            elif args.cond_x == "outer":
+                x_top = holemask(x)
             recon_x = model.decode(z_e, z_q, x_top)
         else:
             recon_x = model.decode(z_e, z_q)

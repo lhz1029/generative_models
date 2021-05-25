@@ -24,7 +24,7 @@ from functools import partial
 
 from vqvae import VQVAE2, fetch_vqvae_dataloader, load_model, save_json, load_json
 from optim import Adam, RMSprop
-
+from utils import holemask
 
 parser = argparse.ArgumentParser()
 
@@ -71,11 +71,10 @@ parser.add_argument('--n_samples', type=int, default=8, help='Number of samples 
 parser.add_argument('--input_shape', type=int, default=(1, 32, 32))
 parser.add_argument('--dry', type=bool, default=False)
 parser.add_argument('--hosp', type=bool, default=False)
-parser.add_argument('--cond_x_top', type=bool, default=False)
+parser.add_argument('--cond_x', type=str, default="none")
 parser.add_argument('--rho', type=float, default=.9)
 parser.add_argument('--rho_same', type=bool, default=False)
 
-# parser.add_argument('--cond_x_top_prior', type=bool, default=False)
 parser.add_argument('--y_from_data', type=bool, default=False)
 
 parser.add_argument('--data_output_dir', type=str, default='', help='Directory to store data output.')
@@ -490,7 +489,9 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
             x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
             x_data = []
             for x, y, hosp in x_dataloader:
-                x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
+                y_oh = torch.zeros(2)
+                y_oh[y.long()] = 1
+                x_data.append((x.to(args.device, non_blocking=True), y_oh.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
     else:
         print("creating {data_filename}")
         x_dataloader = fetch_vqvae_dataloader(args, train=False)
@@ -575,12 +576,15 @@ def generate(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
         # sample bottom prior conditioned on top_sample codes and class labels y
         bottom_samples = sample_prior(bottom_model, preprocess(top_samples, args.n_bits), y, args.n_samples, args.input_dims[1], args.n_bits)
         # decode
-        if args.cond_x_top:
+        if args.cond_x in ["top", "outer"]:
             xs = torch.cat([x for x, y, hosp in x_dataloader], 0)
             hosps = torch.cat([hosp for x, y, hosp in x_dataloader], 0)
             print('x.shape', xs.shape)
             random_indices = torch.randint(high=xs.shape[0], size=(args.n_samples,))
-            x_top = xs[random_indices, :, :4].to(args.device)
+            if args.cond_x == "top":
+                x_top = xs[random_indices, :, :4].to(args.device)
+            elif args.cond_x == "outer":
+                x_top = holemask(xs)[random_indices]
             print('samples shape', bottom_samples.shape, top_samples.shape)
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)), x_top)]
             x, hosps = get_relevant_top_rows(x_dataloader, y)
@@ -625,7 +629,7 @@ def generate_y_from_data(vqvae, bottom_model, top_model, args, ys=None, x_datalo
         # sample bottom prior conditioned on top_sample codes and class labels y
         bottom_samples = sample_prior(bottom_model, preprocess(top_samples, args.n_bits), y, args.n_samples, args.input_dims[1], args.n_bits)
         # decode
-        if args.cond_x_top:
+        if args.cond_x in ["top", "outer"]:
             x, hosps = get_relevant_top_rows(x_dataloader, y)
             # if x.shape[0] < args.n_samples:
             #     x = torch.cat([x, x], dim=0)
@@ -633,7 +637,10 @@ def generate_y_from_data(vqvae, bottom_model, top_model, args, ys=None, x_datalo
             # assert x.shape[0] > args.n_samples
             # x_top = x[:bottom_samples.shape[0]:, :, :4].to(args.device)
             indices = torch.randint(high=x.shape[0], size=(args.n_samples,))
-            x_top = x[indices, :, :4].to(args.device)
+            if args.cond_x == "top":
+                x_top = x[indices, :, :4].to(args.device)
+            elif args.cond_x == "outer":
+                x_top = holemask(x)[indices]
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)), x_top)]
             all_hosps.append(hosps[indices])
         else:
@@ -657,10 +664,13 @@ def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=No
             top_samples += [sample_prior(model, None, y, args.n_samples, args.input_dims[2], args.n_bits).cpu()]
         top_samples = torch.cat(top_samples)
         # decode
-        if args.cond_x_top:
+        if args.cond_x in ["top", "outer"]:
             x, _, _ = next(iter(x_dataloader))
             print('x.shape', x.shape)
-            x_top = x[:bottom_samples.shape[0], :, :4].to(args.device)
+            if args.cond_x == "top":
+                x_top = x[:bottom_samples.shape[0], :, :4].to(args.device)
+            elif args.cond_x == "outer":
+                x_top = holemask(x)[:bottom_samples.shape[0]]
             samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))), x_top=x_top)
         else:
             samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))))
@@ -677,10 +687,13 @@ def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=No
         # stack (1) recon using bottom+top actual latents,
         #       (2) recon using top latents only,
         #       (3) recon using top latent and bottom prior samples
-        if args.cond_x_top:
-            x, _ = next(iter(x_dataloader))
+        if args.cond_x in ["top", "outer"]:
+            x, _, _ = next(iter(x_dataloader))
             print('x.shape', x.shape)
-            x_top = x[:bottom_samples.shape[0], :, :4].to(args.device)
+            if args.cond_x == "top":
+                x_top = x[:bottom_samples.shape[0], :, :4].to(args.device)
+            elif args.cond_x == "outer":
+                x_top = holemask(x)[:bottom_samples.shape[0]]
             recon_actuals = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt, top_gt)), x_top=x_top)
             recon_top = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt.fill_(0), top_gt)), x_top=x_top)
             recon_samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples, top_gt)), x_top=x_top)
@@ -806,14 +819,16 @@ if __name__ == '__main__':
 
         # data_filename = 'x_data_prior_hosp.pt'
         data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
-        if args.cond_x_top:
+        if args.cond_x in ["top", "outer"]:
             if os.path.exists(f'{data_filename}'):
                 x_data = torch.load(f'{data_filename}')
                 if data_filename.startswith('/scratch/apm470'):
                     x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
                     x_data = []
                     for x, y, hosp in x_dataloader:
-                        x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
+                        y_oh = torch.zeros(2)
+                        y_oh[y.long()] = 1
+                        x_data.append((x.to(args.device, non_blocking=True), y_oh.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
             else:
                 print(f"creating {data_filename}")
                 x_dataloader = fetch_vqvae_dataloader(args, train=False)
