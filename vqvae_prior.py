@@ -486,6 +486,11 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
     data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
     if os.path.exists(f'{data_filename}'):
         x_data = torch.load(f'{data_filename}')
+        if data_filename.startswith('/scratch/apm470'):
+            x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
+            x_data = []
+            for x, y, hosp in x_dataloader:
+                x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
     else:
         print("creating {data_filename}")
         x_dataloader = fetch_vqvae_dataloader(args, train=False)
@@ -804,6 +809,11 @@ if __name__ == '__main__':
         if args.cond_x_top:
             if os.path.exists(f'{data_filename}'):
                 x_data = torch.load(f'{data_filename}')
+                if data_filename.startswith('/scratch/apm470'):
+                    x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
+                    x_data = []
+                    for x, y, hosp in x_dataloader:
+                        x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
             else:
                 print(f"creating {data_filename}")
                 x_dataloader = fetch_vqvae_dataloader(args, train=False)
