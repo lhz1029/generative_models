@@ -75,6 +75,7 @@ parser.add_argument('--hosp', type=bool, default=False)
 parser.add_argument('--cond_x', type=str, default="none")
 parser.add_argument('--rho', type=float, default=.9)
 parser.add_argument('--rho_same', type=bool, default=False)
+parser.add_argument('--second_dataset', type=str, default="mimic")
 
 
 # --------------------
@@ -438,37 +439,39 @@ def evaluate(model, dataloader, args):
     return recon_image, recon_loss
 
 def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
-    # train_data = []
-    # i = 0
-    # for x in train_dataloader:
-    #     i += 1
-    #     print(i)
-    #     train_data.append(x[0].to(args.device, non_blocking=True))
-    
-    # torch.save(train_data, 'train_data_rho.8.pt')
-    
-    # valid_data = []
-    # i = 0
-    # for x in valid_dataloader:
-    #     i += 1
-    #     print(i)
-    #     valid_data.append(x[0].to(args.device, non_blocking=True))
-    
-    # torch.save(valid_data, 'valid_data_rho.8.pt')
-    # train_data = torch.load('train_data.pt')
-    # valid_data = torch.load('valid_data.pt')
-
-    train_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt')
-    train_dataloader = DataLoader(train_tensordata, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
-    train_data = []
-    for x in train_dataloader:
-        train_data.append(x[0].to(args.device, non_blocking=True))
-    # val loader contains two datasets, one with equal proba labels and hospitals, chexpert is 10% and contains 10% pneumonia
-    val_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_val.pt')[0]
-    val_dataloader = DataLoader(val_tensordata, args.batch_size, shuffle=False, num_workers=4, pin_memory=('cuda' in args.device))
-    valid_data = []
-    for x in val_dataloader:
-        valid_data.append(x[0].to(args.device, non_blocking=True))
+    if args.second_dataset == "padchest":
+        # train_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt')
+        # train_dataloader = DataLoader(train_tensordata, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
+        # train_data = []
+        # for x in train_dataloader:
+        #     train_data.append(x[0].to(args.device, non_blocking=True))
+        # # val loader contains two datasets, one with equal proba labels and hospitals, chexpert is 10% and contains 10% pneumonia
+        # val_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_val.pt')[0]
+        # val_dataloader = DataLoader(val_tensordata, args.batch_size, shuffle=False, num_workers=4, pin_memory=('cuda' in args.device))
+        # valid_data = []
+        # for x in val_dataloader:
+        #     valid_data.append(x[0].to(args.device, non_blocking=True))
+        train_x, val_x, train_y, val_y, = train_test_split(train_x.numpy(), train_y.numpy(), test_size=0.2, train_size=0.8, shuffle=True)
+    else:
+        train_data = []
+        i = 0
+        for x in train_dataloader:
+            i += 1
+            print(i)
+            train_data.append(x[0].to(args.device, non_blocking=True))
+        
+        torch.save(train_data, 'train_data_rho.8.pt')
+        
+        valid_data = []
+        i = 0
+        for x in valid_dataloader:
+            i += 1
+            print(i)
+            valid_data.append(x[0].to(args.device, non_blocking=True))
+        
+        torch.save(valid_data, 'valid_data_rho.8.pt')
+        train_data = torch.load('train_data.pt')
+        valid_data = torch.load('valid_data.pt')
 
     for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
@@ -511,10 +514,13 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
 
     # setup dataset and dataloader -- preprocess data to [-1, 1]
-    # train_dataloader = fetch_vqvae_dataloader(args, train=True)
-    # valid_dataloader = fetch_vqvae_dataloader(args, train=False)
-    train_dataloader = None
-    valid_dataloader = None
+    if args.second_dataset == "padchest":
+        train_dataloader = None
+        valid_dataloader = None
+    else:
+        train_dataloader = fetch_vqvae_dataloader(args, train=True)
+        valid_dataloader = fetch_vqvae_dataloader(args, train=False)
+    
     args.input_dims = args.input_shape
 
     # save config

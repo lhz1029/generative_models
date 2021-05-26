@@ -76,6 +76,7 @@ parser.add_argument('--rho', type=float, default=.9)
 parser.add_argument('--rho_same', type=bool, default=False)
 
 parser.add_argument('--y_from_data', type=bool, default=False)
+parser.add_argument('--second_dataset', type=str, default="mimic")
 
 parser.add_argument('--data_output_dir', type=str, default='', help='Directory to store data output.')
 
@@ -96,7 +97,12 @@ def extract_codes_from_dataloader(vqvae, dataloader, dataset_path):
         e1, e2 = encoding_indices
         e1s.append(e1)
         e2s.append(e2)
-        ys.append(y)
+        if args.second_dataset == "padchest":
+            y_oh = torch.zeros(y.shape[0], 2)
+            y_oh[range(y.shape[0]), y.squeeze(1).long()] = 1
+            ys.append(y_oh.to(device))
+        else:
+            ys.append(y)
     return TensorDataset(torch.cat(e1s).to(device), torch.cat(e2s).to(device), torch.cat(ys).to(device))
 
 def maybe_extract_codes(vqvae, args, train):
@@ -105,7 +111,14 @@ def maybe_extract_codes(vqvae, args, train):
     dataset_path = os.path.join(args.vqvae_dir, '{}_{}_codes'.format(args.dataset, 'train' if train else 'valid') + args.mini_data*'_mini_data_{}'.format(args.batch_size) + '.pt')
     if not os.path.exists(dataset_path):
         print('Extracting codes for {} data ...'.format('train' if train else 'valid'))
-        dataloader = fetch_vqvae_dataloader(args, train)
+        if args.second_dataset == "padchest":
+            if train:
+                tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt')
+            else:
+                tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_val.pt')[0]
+            dataloader = DataLoader(tensordata, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
+        else:
+            dataloader = fetch_vqvae_dataloader(args, train)
         train_data = []
         i = 0
         for x in dataloader:
@@ -481,16 +494,18 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
         
         torch.save(valid_data,  os.path.join(args.output_dir, 'valid_data_prior.pt'))
 
-    # data_filename = 'x_data_prior_hosp.pt'
-    data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
+    if args.second_dataset == "padchest":
+        data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
+    else:
+        data_filename = 'x_data_prior_hosp.pt'
     if os.path.exists(f'{data_filename}'):
         x_data = torch.load(f'{data_filename}')
         if data_filename.startswith('/scratch/apm470'):
             x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
             x_data = []
             for x, y, hosp in x_dataloader:
-                y_oh = torch.zeros(2)
-                y_oh[y.long()] = 1
+                y_oh = torch.zeros(y.shape[0], 2)
+                y_oh[range(y.shape[0]), y.squeeze(1).long()] = 1
                 x_data.append((x.to(args.device, non_blocking=True), y_oh.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
     else:
         print("creating {data_filename}")
@@ -817,8 +832,10 @@ if __name__ == '__main__':
 #        optimizer.use_ema(True)
         # samples = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device))
 
-        # data_filename = 'x_data_prior_hosp.pt'
-        data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
+        if args.second_dataset == "padchest":
+            data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
+        else:
+            data_filename = 'x_data_prior_hosp.pt'
         if args.cond_x in ["top", "outer"]:
             if os.path.exists(f'{data_filename}'):
                 x_data = torch.load(f'{data_filename}')
@@ -826,8 +843,8 @@ if __name__ == '__main__':
                     x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
                     x_data = []
                     for x, y, hosp in x_dataloader:
-                        y_oh = torch.zeros(2)
-                        y_oh[y.long()] = 1
+                        y_oh = torch.zeros(y.shape[0], 2)
+                        y_oh[range(y.shape[0]), y.squeeze(1).long()] = 1
                         x_data.append((x.to(args.device, non_blocking=True), y_oh.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
             else:
                 print(f"creating {data_filename}")
