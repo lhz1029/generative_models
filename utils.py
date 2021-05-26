@@ -95,3 +95,16 @@ def holemask(x):
     mask_gpu = mask.to(x.device)
     # x with hole of zeros
     return x * mask_gpu
+
+def onlycenter(x):
+    h = 24
+    w = 24
+    SIDE = 32
+    N_CHANNELS = 1
+    margin_h = (SIDE-h)//2
+    margin_w = (SIDE-w)//2
+
+    mask = torch.zeros(1, 1, SIDE, SIDE)
+    mask[:,:,margin_h : h + margin_h, margin_w : w + margin_w] = 1
+    mask_gpu = mask.to(x.device)
+    return x*mask_gpu

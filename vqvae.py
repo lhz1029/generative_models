@@ -28,7 +28,7 @@ from functools import partial
 
 from datasets.chexpert import ChexpertDataset
 from datasets.joint_chest import JointDataset
-from utils import holemask
+from utils import holemask, onlycenter
 
 parser = argparse.ArgumentParser()
 # action
@@ -76,6 +76,7 @@ parser.add_argument('--cond_x', type=str, default="none")
 parser.add_argument('--rho', type=float, default=.9)
 parser.add_argument('--rho_same', type=bool, default=False)
 parser.add_argument('--second_dataset', type=str, default="mimic")
+parser.add_argument('--encoder_input', type=str, default="full")
 
 
 # --------------------
@@ -268,6 +269,8 @@ class VQVAE2(nn.Module):
         self.cond_x = cond_x
 
     def encode(self, x):
+        if args.encoder_input == "onlycenter":
+            x = onlycenter(x)
         z1 = self.enc1(x)
         z2 = self.enc2(z1)
         return (z1, z2)  # each is (B,E,H,W)
