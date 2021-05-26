@@ -37,7 +37,7 @@ python  vqvae_prior.py --vqvae_dir long_padchest_top --restore_dir long_prior_bo
 python vqvae.py --train --n_embeddings 64 --n_epochs 200 --ema --cuda 0 --dataset joint_chest --output_dir long_mimic_outer --cond_x outer && \
 python vqvae_prior.py --vqvae_dir long_mimic_outer --train --n_epochs 150 --batch_size 256 --lr 0.00005 --which_prior top  --n_cond_classes 2 --n_channels 128 --n_res_layers 5 --n_out_stack_layers 10 --n_cond_stack_layers 0 --drop_rate 0.1 --cuda 0 --output_dir long_mimic_outer_prior --cond_x outer && \
 python vqvae_prior.py --vqvae_dir long_mimic_outer --train --n_epochs 150 --batch_size 256 --lr 0.00005 --which_prior bottom --n_cond_classes 2 --n_channels 128 --n_res_layers 20 --n_out_stack_layers 0 --n_cond_stack_layers 10 --drop_rate 0.1 --output_dir long_mimic_outer_prior_bottom  --cuda 0 --cond_x outer && \
-python  vqvae_prior.py --vqvae_dir long_mimic_outer --restore_dir long_mimic_outer_prior_bottom long_mimic_outer_prior --generate --n_samples 12800 --cuda 0  --n_cond_classes 2  --cond_x outer --batch_size 128 --hosp true --data_output_dir generated/nurd_mimic_outer
+python  vqvae_prior.py --vqvae_dir long_mimic_outer --restore_dir long_mimic_outer_prior_bottom long_mimic_outer_prior --generate --n_samples 12800 --cuda 0  --n_cond_classes 2  --cond_x outer --batch_size 128 --hosp true --data_output_dir generated/nurd_mimic_outer_long
 
 # padchest outer
 python vqvae.py --train --n_embeddings 64 --n_epochs 200 --ema --cuda 0 --dataset joint_chest --output_dir long_padchest_outer --cond_x outer --second_dataset padchest && \
