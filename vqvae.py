@@ -440,18 +440,17 @@ def evaluate(model, dataloader, args):
 
 def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
     if args.second_dataset == "padchest":
-        # train_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt')
-        # train_dataloader = DataLoader(train_tensordata, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
-        # train_data = []
-        # for x in train_dataloader:
-        #     train_data.append(x[0].to(args.device, non_blocking=True))
-        # # val loader contains two datasets, one with equal proba labels and hospitals, chexpert is 10% and contains 10% pneumonia
-        # val_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_val.pt')[0]
-        # val_dataloader = DataLoader(val_tensordata, args.batch_size, shuffle=False, num_workers=4, pin_memory=('cuda' in args.device))
-        # valid_data = []
-        # for x in val_dataloader:
-        #     valid_data.append(x[0].to(args.device, non_blocking=True))
-        train_x, val_x, train_y, val_y, = train_test_split(train_x.numpy(), train_y.numpy(), test_size=0.2, train_size=0.8, shuffle=True)
+        train_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt')
+        train_dataloader = DataLoader(train_tensordata, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
+        train_data = []
+        for x in train_dataloader:
+            train_data.append(x[0].to(args.device, non_blocking=True))
+        # val loader contains two datasets, one with equal proba labels and hospitals, chexpert is 10% and contains 10% pneumonia
+        val_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_val.pt')[0]
+        val_dataloader = DataLoader(val_tensordata, args.batch_size, shuffle=False, num_workers=4, pin_memory=('cuda' in args.device))
+        valid_data = []
+        for x in val_dataloader:
+            valid_data.append(x[0].to(args.device, non_blocking=True))
     else:
         train_data = []
         i = 0
