@@ -4,6 +4,7 @@ import shutil
 import json
 from datetime import datetime
 import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 from tensorboardX import SummaryWriter
 
@@ -108,3 +109,27 @@ def onlycenter(x):
     mask[:,:,margin_h : h + margin_h, margin_w : w + margin_w] = 1
     mask_gpu = mask.to(x.device)
     return x*mask_gpu
+
+def load_precreated_data(args, mode="train", include="x"):
+    """
+    include: "x", "xy", "xyh"
+    """
+    tensordata = torch.load(f'/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_{args.second_dataset}_dataset_rho09_saved_{mode}.pt')
+    if mode == "val":
+        # 0 is test, 1 is val
+        tensordata = tensordata[1]
+    x = tensordata.tensors[0]
+    y = tensordata.tensors[1]
+    h = tensordata.tensors[2]
+    y_oh = torch.zeros(y.shape[0], 2)
+    y_oh[range(y.shape[0]), y.squeeze(1).long()] = 1
+    if include == "xyh":
+        x_dataset = TensorDataset(x, y_oh, h)
+    elif include == "xy":
+        x_dataset = TensorDataset(x, y_oh)
+    elif include == "x":
+        x_dataset = x
+    else:
+        raise ValueError(f"include not supported: {include}")
+    x_dataloader = DataLoader(x_dataset, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
+    return x_dataloader

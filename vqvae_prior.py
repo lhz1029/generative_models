@@ -24,7 +24,7 @@ from functools import partial
 
 from vqvae import VQVAE2, fetch_vqvae_dataloader, load_model, save_json, load_json
 from optim import Adam, RMSprop
-from utils import holemask
+from utils import holemask, load_precreated_data
 
 parser = argparse.ArgumentParser()
 
@@ -79,6 +79,7 @@ parser.add_argument('--y_from_data', type=bool, default=False)
 parser.add_argument('--second_dataset', type=str, default="mimic")
 
 parser.add_argument('--data_output_dir', type=str, default='', help='Directory to store data output.')
+parser.add_argument('--encoder_input', type=str, default="full")
 
 # --------------------
 # Data and model loading
@@ -111,14 +112,7 @@ def maybe_extract_codes(vqvae, args, train):
     dataset_path = os.path.join(args.vqvae_dir, '{}_{}_codes'.format(args.dataset, 'train' if train else 'valid') + args.mini_data*'_mini_data_{}'.format(args.batch_size) + '.pt')
     if not os.path.exists(dataset_path):
         print('Extracting codes for {} data ...'.format('train' if train else 'valid'))
-        if args.second_dataset == "padchest":
-            if train:
-                tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt')
-            else:
-                tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_val.pt')[0]
-            dataloader = DataLoader(tensordata, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
-        else:
-            dataloader = fetch_vqvae_dataloader(args, train)
+        dataloader = load_precreated_data(args, mode="train", include="xy")
         train_data = []
         i = 0
         for x in dataloader:
@@ -494,30 +488,7 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
         
         torch.save(valid_data,  os.path.join(args.output_dir, 'valid_data_prior.pt'))
 
-    if args.second_dataset == "padchest":
-        data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
-    else:
-        data_filename = 'x_data_prior_hosp.pt'
-    if os.path.exists(f'{data_filename}'):
-        x_data = torch.load(f'{data_filename}')
-        if data_filename.startswith('/scratch/apm470'):
-            x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
-            x_data = []
-            for x, y, hosp in x_dataloader:
-                y_oh = torch.zeros(y.shape[0], 2)
-                y_oh[range(y.shape[0]), y.squeeze(1).long()] = 1
-                x_data.append((x.to(args.device, non_blocking=True), y_oh.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
-    else:
-        print("creating {data_filename}")
-        x_dataloader = fetch_vqvae_dataloader(args, train=False)
-        x_data = []
-        i = 0
-        for x, y, hosp in x_dataloader:
-            i += 1
-            print(i)
-            x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
-        
-        torch.save(x_data, f'{data_filename}')
+    x_dataloader = load_precreated_data(args, mode="train", include="xyh")
 
     for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
@@ -535,7 +506,7 @@ def train_and_evaluate(model, vqvae, train_dataloader, valid_dataloader, optimiz
 
             # generate
             # samples = generate_samples_in_training(model, vqvae, train_dataloader, args)
-            samples = generate_samples_in_training(model, vqvae, train_data, args, x_data)
+            samples = generate_samples_in_training(model, vqvae, train_data, args, x_dataloader)
             samples = make_grid(samples, normalize=True, nrow=args.n_samples)
             if args.distributed:
                 # collect samples tensor from all processes onto main process cpu
@@ -685,7 +656,7 @@ def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=No
             if args.cond_x == "top":
                 x_top = x[:bottom_samples.shape[0], :, :4].to(args.device)
             elif args.cond_x == "outer":
-                x_top = holemask(x)[:bottom_samples.shape[0]]
+                x_top = holemask(x)[:bottom_samples.shape[0]].to(args.device)
             samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))), x_top=x_top)
         else:
             samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples.to(args.device), top_samples.to(args.device))))
@@ -708,7 +679,7 @@ def generate_samples_in_training(model, vqvae, dataloader, args, x_dataloader=No
             if args.cond_x == "top":
                 x_top = x[:bottom_samples.shape[0], :, :4].to(args.device)
             elif args.cond_x == "outer":
-                x_top = holemask(x)[:bottom_samples.shape[0]]
+                x_top = holemask(x)[:bottom_samples.shape[0]].to(args.device)
             recon_actuals = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt, top_gt)), x_top=x_top)
             recon_top = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_gt.fill_(0), top_gt)), x_top=x_top)
             recon_samples = vqvae.decode(z_e=None, z_q=vqvae.embed((bottom_samples, top_gt)), x_top=x_top)
@@ -832,39 +803,15 @@ if __name__ == '__main__':
 #        optimizer.use_ema(True)
         # samples = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device))
 
-        if args.second_dataset == "padchest":
-            data_filename = '/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt'
-        else:
-            data_filename = 'x_data_prior_hosp.pt'
         if args.cond_x in ["top", "outer"]:
-            if os.path.exists(f'{data_filename}'):
-                x_data = torch.load(f'{data_filename}')
-                if data_filename.startswith('/scratch/apm470'):
-                    x_dataloader = DataLoader(x_data, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
-                    x_data = []
-                    for x, y, hosp in x_dataloader:
-                        y_oh = torch.zeros(y.shape[0], 2)
-                        y_oh[range(y.shape[0]), y.squeeze(1).long()] = 1
-                        x_data.append((x.to(args.device, non_blocking=True), y_oh.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
-            else:
-                print(f"creating {data_filename}")
-                x_dataloader = fetch_vqvae_dataloader(args, train=False)
-                x_data = []
-                i = 0
-                for x, y, hosp in x_dataloader:
-                    i += 1
-                    x_data.append((x.to(args.device, non_blocking=True), y.to(args.device, non_blocking=True), hosp.to(args.device, non_blocking=True)))
-                
-                torch.save(x_data, f'{data_filename}')
-                # have to reset this since fetch_vqvae_dataloader overwrites it
-                args.input_dims = [img_dims, [img_dims[0]//4, img_dims[1]//4], [img_dims[0]//8, img_dims[1]//8]]
+            x_dataloader = load_precreated_data(args, mode="train", include="xyh")
         else:
-            x_data = None
+            x_dataloader = None
         if args.y_from_data:
             # TODO use y from x_data
-            samples, labels, hosps = generate_y_from_data(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_data)
+            samples, labels, hosps = generate_y_from_data(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_dataloader)
         else:
-            samples, labels, hosps = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_data)
+            samples, labels, hosps = generate(vqvae, bottom_model, top_model, args, ys=torch.eye(args.n_cond_classes, args.n_cond_classes).to(args.device), x_dataloader=x_dataloader)
         if args.distributed:
             torch.manual_seed(args.rank)
             # collect samples tensor from all processes onto main process cpu

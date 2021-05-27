@@ -28,7 +28,7 @@ from functools import partial
 
 from datasets.chexpert import ChexpertDataset
 from datasets.joint_chest import JointDataset
-from utils import holemask, onlycenter
+from utils import holemask, onlycenter, load_precreated_data
 
 parser = argparse.ArgumentParser()
 # action
@@ -224,7 +224,7 @@ class ResidualLayer(nn.Sequential):
 
 class VQVAE2(nn.Module):
     def __init__(self, input_dims, n_embeddings, embedding_dim, n_channels, n_res_channels, n_res_layers,
-                 ema=False, ema_decay=0.99, ema_eps=1e-5, cond_x="none", **kwargs):   # keep kwargs so can load from config with arbitrary other args
+                 ema=False, ema_decay=0.99, ema_eps=1e-5, cond_x="none", encoder_input="full", **kwargs):   # keep kwargs so can load from config with arbitrary other args
         super().__init__()
         self.ema = ema
         print('input_dims', input_dims)
@@ -267,9 +267,10 @@ class VQVAE2(nn.Module):
         self.vq1 = VQ(n_embeddings, embedding_dim, ema, ema_decay, ema_eps)
         self.vq2 = VQ(n_embeddings, embedding_dim, ema, ema_decay, ema_eps)
         self.cond_x = cond_x
+        self.encoder_input = encoder_input
 
     def encode(self, x):
-        if args.encoder_input == "onlycenter":
+        if self.encoder_input == "onlycenter":
             x = onlycenter(x)
         z1 = self.enc1(x)
         z2 = self.enc2(z1)
@@ -370,7 +371,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, writer, args):
 
             # loss = model(x.to(args.device), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
             # loss = model(x[0].to(args.device, non_blocking=True), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
-            loss = model(x, args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
+            loss = model(x.to(args.device, non_blocking=True), args.commitment_cost, writer if args.step % args.log_interval == 0 else None)
 
             optimizer.zero_grad()
             loss.backward()
@@ -442,38 +443,8 @@ def evaluate(model, dataloader, args):
     return recon_image, recon_loss
 
 def train_and_evaluate(model, train_dataloader, valid_dataloader, optimizer, scheduler, writer, args):
-    if args.second_dataset == "padchest":
-        train_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_train.pt')
-        train_dataloader = DataLoader(train_tensordata, args.batch_size, shuffle=True, num_workers=4, pin_memory=('cuda' in args.device))
-        train_data = []
-        for x in train_dataloader:
-            train_data.append(x[0].to(args.device, non_blocking=True))
-        # val loader contains two datasets, one with equal proba labels and hospitals, chexpert is 10% and contains 10% pneumonia
-        val_tensordata = torch.load('/scratch/apm470/nuisance-orthogonal-prediction/code/nrd-xray/erm-on-generated/joint_chexpert_padchest_dataset_rho09_saved_val.pt')[0]
-        val_dataloader = DataLoader(val_tensordata, args.batch_size, shuffle=False, num_workers=4, pin_memory=('cuda' in args.device))
-        valid_data = []
-        for x in val_dataloader:
-            valid_data.append(x[0].to(args.device, non_blocking=True))
-    else:
-        train_data = []
-        i = 0
-        for x in train_dataloader:
-            i += 1
-            print(i)
-            train_data.append(x[0].to(args.device, non_blocking=True))
-        
-        torch.save(train_data, 'train_data_rho.8.pt')
-        
-        valid_data = []
-        i = 0
-        for x in valid_dataloader:
-            i += 1
-            print(i)
-            valid_data.append(x[0].to(args.device, non_blocking=True))
-        
-        torch.save(valid_data, 'valid_data_rho.8.pt')
-        train_data = torch.load('train_data.pt')
-        valid_data = torch.load('valid_data.pt')
+    train_data = load_precreated_data(args, "train", include="x")
+    valid_data = load_precreated_data(args, "val", include="x")
 
     for epoch in range(args.start_epoch, args.n_epochs):
         # train_epoch(model, train_dataloader, optimizer, scheduler, epoch, writer, args)
@@ -515,13 +486,8 @@ if __name__ == '__main__':
 
     torch.manual_seed(args.seed)
 
-    # setup dataset and dataloader -- preprocess data to [-1, 1]
-    if args.second_dataset == "padchest":
-        train_dataloader = None
-        valid_dataloader = None
-    else:
-        train_dataloader = fetch_vqvae_dataloader(args, train=True)
-        valid_dataloader = fetch_vqvae_dataloader(args, train=False)
+    train_dataloader = None
+    valid_dataloader = None
     
     args.input_dims = args.input_shape
 
