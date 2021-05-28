@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 import torch
 from torch.utils.data import TensorDataset, DataLoader
+import numpy as np
 
 from tensorboardX import SummaryWriter
 
@@ -88,7 +89,10 @@ def holemask(x, h=24, w=24, SIDE=32, is_torch=True):
     margin_h = (SIDE-h)//2
     margin_w = (SIDE-w)//2
 
-    mask = torch.ones(1, N_CHANNELS, SIDE, SIDE)
+    if is_torch:
+        mask = torch.ones(1, N_CHANNELS, SIDE, SIDE)
+    else:
+        mask = np.ones(1, N_CHANNELS, SIDE, SIDE)
     mask[:,:,margin_h : h + margin_h, margin_w : w + margin_w] = 0
     if is_torch:
         mask = mask.to(x.device)
@@ -99,8 +103,10 @@ def onlycenter(x, h=24, w=24, SIDE=32, is_torch=True):
     N_CHANNELS = 1
     margin_h = (SIDE-h)//2
     margin_w = (SIDE-w)//2
-
-    mask = torch.zeros(1, 1, SIDE, SIDE)
+    if is_torch:
+        mask = torch.zeros(1, N_CHANNELS, SIDE, SIDE)
+    else:
+        mask = np.ones(1, N_CHANNELS, SIDE, SIDE)
     mask[:,:,margin_h : h + margin_h, margin_w : w + margin_w] = 1
     if is_torch:
         mask = mask.to(x.device)
