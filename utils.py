@@ -82,7 +82,7 @@ def load_checkpoint(checkpoint, models, optimizers=None, scheduler=None, best_me
 
     return checkpoint['epoch']
 
-def holemask(x, h=24, w=24, SIDE=32):
+def holemask(x, h=24, w=24, SIDE=32, is_torch=True):
     """ Returns x with a hole of zeros """
     N_CHANNELS = 1
     margin_h = (SIDE-h)//2
@@ -90,19 +90,21 @@ def holemask(x, h=24, w=24, SIDE=32):
 
     mask = torch.ones(1, N_CHANNELS, SIDE, SIDE)
     mask[:,:,margin_h : h + margin_h, margin_w : w + margin_w] = 0
-    mask_gpu = mask.to(x.device)
+    if is_torch:
+        mask = mask.to(x.device)
     # x with hole of zeros
-    return x * mask_gpu
+    return x * mask
 
-def onlycenter(x, h=24, w=24, SIDE=32):
+def onlycenter(x, h=24, w=24, SIDE=32, is_torch=True):
     N_CHANNELS = 1
     margin_h = (SIDE-h)//2
     margin_w = (SIDE-w)//2
 
     mask = torch.zeros(1, 1, SIDE, SIDE)
     mask[:,:,margin_h : h + margin_h, margin_w : w + margin_w] = 1
-    mask_gpu = mask.to(x.device)
-    return x*mask_gpu
+    if is_torch:
+        mask = mask.to(x.device)
+    return x*mask
 
 def load_precreated_data(args, mode="train", include="x"):
     """
