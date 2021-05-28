@@ -82,11 +82,8 @@ def load_checkpoint(checkpoint, models, optimizers=None, scheduler=None, best_me
 
     return checkpoint['epoch']
 
-def holemask(x):
+def holemask(x, h=24, w=24, SIDE=32):
     """ Returns x with a hole of zeros """
-    h = 24
-    w = 24
-    SIDE = 32
     N_CHANNELS = 1
     margin_h = (SIDE-h)//2
     margin_w = (SIDE-w)//2
@@ -97,10 +94,7 @@ def holemask(x):
     # x with hole of zeros
     return x * mask_gpu
 
-def onlycenter(x):
-    h = 24
-    w = 24
-    SIDE = 32
+def onlycenter(x, h=24, w=24, SIDE=32):
     N_CHANNELS = 1
     margin_h = (SIDE-h)//2
     margin_w = (SIDE-w)//2
