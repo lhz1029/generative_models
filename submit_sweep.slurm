@@ -3,7 +3,7 @@
 #SBATCH --export=ALL
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=15G
-#SBATCH --array=1-10
+#SBATCH --array=1-1
 #SBATCH --gres=gpu
 
 
