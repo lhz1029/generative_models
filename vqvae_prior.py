@@ -570,7 +570,7 @@ def generate(vqvae, bottom_model, top_model, args, ys=None, x_dataloader=None):
             if args.cond_x == "top":
                 x_top = xs[random_indices, :, :4].to(args.device)
             elif args.cond_x == "outer":
-                x_top = holemask(xs)[random_indices]
+                x_top = holemask(xs)[random_indices].to(args.device)
             print('samples shape', bottom_samples.shape, top_samples.shape)
             samples += [vqvae.decode(None, vqvae.embed((bottom_samples, top_samples)), x_top)]
             x, hosps = get_relevant_top_rows(x_dataloader, y)
@@ -591,12 +591,13 @@ def get_relevant_top_rows(x_dataloader, y_label):
     """ 
     y_label is one-hot encoded
     """
-    assert type(x_dataloader) == list
+    # assert type(x_dataloader) == list
     assert torch.sum(y_label) == 1
     # turn batched inputs into full 
-    xs = torch.cat([x for x, y, hosp in x_dataloader], 0)
-    ys = torch.cat([y for x, y, hosp in x_dataloader], 0)
-    hosps = torch.cat([hosp for x, y, hosp in x_dataloader], 0)
+    xs = torch.cat([x for x, y, hosp in x_dataloader], 0).to(args.device)
+    ys = torch.cat([y for x, y, hosp in x_dataloader], 0).to(args.device)
+    hosps = torch.cat([hosp for x, y, hosp in x_dataloader], 0).to(args.device)
+    print(xs.shape, ys.shape, hosps.shape)
     y_label_num = torch.argmax(y_label)
     print(y_label_num)
     y_mask = torch.argmax(ys, 1) == y_label_num
@@ -616,7 +617,7 @@ def generate_y_from_data(vqvae, bottom_model, top_model, args, ys=None, x_datalo
         bottom_samples = sample_prior(bottom_model, preprocess(top_samples, args.n_bits), y, args.n_samples, args.input_dims[1], args.n_bits)
         # decode
         if args.cond_x in ["top", "outer"]:
-            x, hosps = get_relevant_top_rows(x_dataloader, y)
+            x, hosps = get_relevant_top_rows(x_dataloader, y.to(args.device))
             # if x.shape[0] < args.n_samples:
             #     x = torch.cat([x, x], dim=0)
             # print('x.shape', x.shape)

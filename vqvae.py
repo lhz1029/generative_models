@@ -478,7 +478,7 @@ if __name__ == '__main__':
         args.output_dir = args.restore_dir
     if not args.output_dir:  # if not given use results/file_name/time_stamp
         args.output_dir = './results/{}/{}'.format(os.path.splitext(__file__)[0], time.strftime('%Y-%m-%d_%H-%M-%S', time.gmtime()))
-    os.makedirs(args.output_dir, exist_ok=False)
+    os.makedirs(args.output_dir, exist_ok=True)
     writer = SummaryWriter(log_dir = args.output_dir)
 
     args.device = 'cuda:{}'.format(args.cuda) if args.cuda is not None and torch.cuda.is_available() else 'cpu'
